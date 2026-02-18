@@ -1,0 +1,28 @@
+{
+  "mcpServers": {
+    "airtable": {
+      "command": "npx",
+      "args": ["-y", "airtable-mcp-server"],
+      "env": {
+        "AIRTABLE_API_KEY": "${AIRTABLE_API_KEY}"
+      }
+    }
+  },
+  "hooks": {
+    "// Example: Run tests after file edits": "",
+    "// PostToolUse": {
+      "// matcher": "Edit|Write",
+      "// command": "npm test --silent 2>&1 | tail -5"
+    },
+    "// Example: Block direct commits to main": "",
+    "// PreToolUse": {
+      "// matcher": "Bash",
+      "// command": "bash -c 'if echo \"$TOOL_INPUT\" | grep -q \"git commit\" && git branch --show-current | grep -q \"^main$\"; then echo \"BLOCKED: Do not commit directly to main. Create a feature branch first.\"; exit 1; fi'"
+    },
+    "// Example: Notify on attention needed": "",
+    "// Notification": {
+      "// matcher": ".*",
+      "// command": "echo 'Claude needs your attention'"
+    }
+  }
+}
