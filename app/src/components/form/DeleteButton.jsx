@@ -4,9 +4,9 @@ import { Button } from "@/components/ui/button";
 import { Trash2 } from "lucide-react";
 import { useDeleteAppointment } from "@/hooks/useAppointments";
 
-export default function DeleteButton({ record, weekStart, onClose }) {
+export default function DeleteButton({ record, startDate, endDate, onClose }) {
   const [confirm, setConfirm] = useState(false);
-  const del = useDeleteAppointment(weekStart);
+  const del = useDeleteAppointment(startDate, endDate);
 
   async function handleDelete() {
     try {

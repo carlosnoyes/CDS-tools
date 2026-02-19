@@ -21,7 +21,7 @@ const COLUMNS = [
   { key: "vehicle", label: "Vehicle" },
   { key: "course", label: "Course" },
   { key: "classNumber", label: "#" },
-  { key: "pudu", label: "PUDU" },
+  { key: "pudu", label: "PUDO" },
   { key: "location", label: "Location" },
   { key: "notes", label: "Notes" },
 ];
@@ -36,7 +36,7 @@ function getSort(appt, key, maps) {
     case "vehicle": return maps.vehicleMap[f.Vehicle?.[0]]?.["Car Name"] ?? "";
     case "course": return (f["Name (from Course)"] ?? [])[0] ?? "";
     case "classNumber": return f["Class Number"] ?? 0;
-    case "pudu": return f.PUDU ?? 0;
+    case "pudu": return f.PUDO ?? 0;
     case "location": return f.Location ?? "";
     default: return "";
   }
@@ -126,7 +126,7 @@ export default function AppointmentTable({ appointments, refData, onEdit }) {
                 <TableCell>{vehicleName}</TableCell>
                 <TableCell className="whitespace-nowrap">{courseName}</TableCell>
                 <TableCell className="text-center">{f["Class Number"] ?? "—"}</TableCell>
-                <TableCell>{formatDuration(f.PUDU)}</TableCell>
+                <TableCell>{formatDuration(f.PUDO)}</TableCell>
                 <TableCell>{f.Location ?? "—"}</TableCell>
                 <TableCell className="max-w-[200px] truncate text-muted-foreground text-sm">
                   {f.Notes ?? ""}

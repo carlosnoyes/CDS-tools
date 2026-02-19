@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { getMondayOf } from "@/utils/time";
+import { addMonths } from "date-fns";
 import { useAppointments } from "@/hooks/useAppointments";
 import { useReferenceData } from "@/hooks/useReferenceData";
 import AppointmentTable from "@/components/table/AppointmentTable";
@@ -8,15 +8,17 @@ import AppointmentModal from "@/components/form/AppointmentModal";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 
-const THIS_MONDAY = getMondayOf(new Date());
+const TODAY = new Date();
+TODAY.setHours(0, 0, 0, 0);
+const ONE_MONTH_OUT = addMonths(TODAY, 1);
 
 export default function TablePage() {
-  const [weekStart, setWeekStart] = useState(THIS_MONDAY);
+  const [startDate, setStartDate] = useState(TODAY);
+  const [endDate, setEndDate] = useState(ONE_MONTH_OUT);
   const [modalOpen, setModalOpen] = useState(false);
   const [editRecord, setEditRecord] = useState(null);
-  const [filters, setFilters] = useState({ instructor: "", location: "" });
 
-  const { data: appointments = [], isLoading, isError } = useAppointments(weekStart);
+  const { data: appointments = [], isLoading, isError } = useAppointments(startDate, endDate);
   const ref = useReferenceData();
 
   function openCreate() {
@@ -29,14 +31,6 @@ export default function TablePage() {
     setModalOpen(true);
   }
 
-  // Apply filters
-  const filtered = appointments.filter((a) => {
-    const instructorIds = a.fields.Instructor ?? [];
-    if (filters.instructor && !instructorIds.includes(filters.instructor)) return false;
-    if (filters.location && a.fields.Location !== filters.location) return false;
-    return true;
-  });
-
   return (
     <div className="max-w-screen-2xl mx-auto px-4 py-6">
       <div className="flex items-center justify-between mb-4">
@@ -48,11 +42,10 @@ export default function TablePage() {
       </div>
 
       <TableFilters
-        filters={filters}
-        onFilterChange={setFilters}
-        instructorOptions={ref.instructorOptions}
-        weekStart={weekStart}
-        onWeekChange={setWeekStart}
+        startDate={startDate}
+        endDate={endDate}
+        onStartChange={setStartDate}
+        onEndChange={setEndDate}
       />
 
       {isLoading && <p className="text-muted-foreground text-sm mt-4">Loading…</p>}
@@ -60,10 +53,11 @@ export default function TablePage() {
 
       {!isLoading && !isError && (
         <AppointmentTable
-          appointments={filtered}
+          appointments={appointments}
           refData={ref}
           onEdit={openEdit}
-          weekStart={weekStart}
+          startDate={startDate}
+          endDate={endDate}
         />
       )}
 
@@ -72,7 +66,8 @@ export default function TablePage() {
         onOpenChange={setModalOpen}
         record={editRecord}
         refData={ref}
-        weekStart={weekStart}
+        startDate={startDate}
+        endDate={endDate}
       />
     </div>
   );

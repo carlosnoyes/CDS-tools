@@ -1,6 +1,7 @@
 # Environment files (never commit secrets)
 .env
 app/.env
+.mcp.json
 
 # Node modules
 node_modules/

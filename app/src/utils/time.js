@@ -8,9 +8,11 @@ import {
   parseISO,
 } from "date-fns";
 
-export const DAY_START_HOUR = 6;   // 6:00 AM
+export const DAY_START_HOUR = 8;   // 8:00 AM
 export const DAY_END_HOUR = 21;    // 9:00 PM
-export const PX_PER_HOUR = 64;     // pixels per hour in the calendar grid
+export const DEFAULT_PX_PER_HOUR = 64;  // default pixels per hour (user-adjustable via zoom)
+// Legacy alias so existing imports still work during transition
+export const PX_PER_HOUR = DEFAULT_PX_PER_HOUR;
 
 // Get Monday of the week containing a given date
 export function getMondayOf(date) {
@@ -86,7 +88,7 @@ export const HOUR_LABELS = Array.from(
   }
 );
 
-// Format seconds into "Xh Ym" string (for PUDU display)
+// Format seconds into "Xh Ym" string (for PUDO display)
 export function formatDuration(seconds) {
   if (!seconds) return "—";
   const h = Math.floor(seconds / 3600);

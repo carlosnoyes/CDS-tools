@@ -6,12 +6,10 @@
 
 | Document | Purpose |
 |----------|---------|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | System overview, modules, data flow |
-| [DECISIONS.md](DECISIONS.md) | Architecture Decision Records (ADR) |
-| [DEV_SETUP.md](DEV_SETUP.md) | Local development setup & commands |
-| [TESTING.md](TESTING.md) | Test strategy, how to run & add tests |
-| [RUNBOOK.md](RUNBOOK.md) | Incident response & rollback procedures |
-| [SECURITY.md](SECURITY.md) | Security posture, secrets, vulnerabilities |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | System overview, modules, data flow, Airtable schema |
+| [LOGIC.md](LOGIC.md) | Scheduling business logic — fields, inputs, calculations, transformations |
+| [REFERENCES.md](REFERENCES.md) | Index of reference documents pulled during work |
+| [references/](references/) | Reference documents (API docs, schemas, etc.) |
 
 ## Root-level Files
 
@@ -20,11 +18,18 @@
 | [CLAUDE.md](../CLAUDE.md) | Claude Code project instructions |
 | [PLAN.md](../PLAN.md) | Session plan template |
 | [STATE.md](../STATE.md) | Durable project state |
-| [CONTRIBUTING.md](../CONTRIBUTING.md) | Contribution workflow |
+
+## Claude Code Config
+
+| File | Purpose |
+|------|---------|
+| [.mcp.json](../.mcp.json) | MCP server definitions |
+| [.claude/settings.json](../.claude/settings.json) | Hooks skeleton |
+| [.claude/skills/](../.claude/skills/) | Project skills |
 
 ## How to Navigate
 
-- **New contributor?** Start with [DEV_SETUP.md](DEV_SETUP.md), then [ARCHITECTURE.md](ARCHITECTURE.md).
-- **Making a design choice?** Log it in [DECISIONS.md](DECISIONS.md).
-- **Something broke?** Check [RUNBOOK.md](RUNBOOK.md).
-- **Security concern?** See [SECURITY.md](SECURITY.md).
+- **Understanding the system?** Start with [ARCHITECTURE.md](ARCHITECTURE.md).
+- **Understanding fields and business logic?** See [LOGIC.md](LOGIC.md).
+- **Need a reference doc?** Check [references/](references/) and [REFERENCES.md](REFERENCES.md).
+- **Resuming work?** Read [STATE.md](../STATE.md) first.

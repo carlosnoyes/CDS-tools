@@ -14,45 +14,91 @@
 ## High-Level Diagram
 
 ```
-┌─────────────────────────────────────────┐
-│              CDS-tools                  │
-│                                         │
-│  ┌───────────┐  ┌───────────┐           │
-│  │  Tool A   │  │  Tool B   │  ...      │
-│  └─────┬─────┘  └─────┬─────┘           │
-│        │               │                │
-│        └───────┬───────┘                │
-│                ▼                        │
-│        ┌───────────────┐                │
-│        │  Shared Utils │                │
-│        └───────────────┘                │
-└─────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────┐
+│                      CDS-tools                         │
+│                                                        │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │                  app/ (React/Vite)               │  │
+│  │                                                  │  │
+│  │  ┌─────────────┐    ┌──────────────────────────┐ │  │
+│  │  │  React UI   │    │  hooks/                  │ │  │
+│  │  │  Components │◄───│  useAppointments         │ │  │
+│  │  └─────────────┘    │  useReferenceData        │ │  │
+│  │                     └──────────┬───────────────┘ │  │
+│  │                                │                  │  │
+│  │                     ┌──────────▼───────────────┐ │  │
+│  │                     │  airtable/               │ │  │
+│  │                     │  appointments.js         │ │  │
+│  │                     │  courses.js              │ │  │
+│  │                     │  instructors.js          │ │  │
+│  │                     │  students.js             │ │  │
+│  │                     │  vehicles.js             │ │  │
+│  │                     └──────────┬───────────────┘ │  │
+│  │                                │                  │  │
+│  │                     ┌──────────▼───────────────┐ │  │
+│  │                     │  client.js               │ │  │
+│  │                     │  (Airtable REST API)     │ │  │
+│  │                     └──────────────────────────┘ │  │
+│  └──────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+               ┌────────────────────────┐
+               │   Airtable Base        │
+               │   appfmh7j77kCe8hy2    │
+               └────────────────────────┘
 ```
-
-<!-- TODO: Replace with actual architecture once modules are defined -->
 
 ## Key Modules
 
+### App (`app/`)
+
+React/Vite frontend — appointment scheduling tool.
+
 | Module | Location | Purpose |
 |--------|----------|---------|
-| <!-- TODO --> | `src/` | <!-- TODO --> |
+| Airtable client | `app/src/airtable/client.js` | Thin fetch wrapper — handles auth, pagination, CRUD, errors |
+| Appointments | `app/src/airtable/appointments.js` | Fetch (by week range), create, update, delete appointments |
+| Courses | `app/src/airtable/courses.js` | Fetch all in-car courses (Abbreviation, Name, Length, In Car) |
+| Instructors | `app/src/airtable/instructors.js` | Fetch all instructors (Full Name, First Name, Last Name, Role, Capabilities) |
+| Students | `app/src/airtable/students.js` | Fetch all students (Full Name, First Name, Last Name, Phone, Email) |
+| Vehicles | `app/src/airtable/vehicles.js` | Fetch all vehicles (Car Name) |
+| Constants | `app/src/utils/constants.js` | `BASE_ID`, `TABLES` map, `APPT_FIELDS` map, `LOCATIONS`, `INSTRUCTOR_ORDER` |
+| Colors | `app/src/utils/colors.js` | Instructor color assignment utilities |
+| Time | `app/src/utils/time.js` | Date/time helpers |
+| Overlap | `app/src/utils/overlap.js` | Appointment overlap detection |
+| useAppointments | `app/src/hooks/useAppointments.js` | Hook — fetch/mutate appointments for a given week |
+| useReferenceData | `app/src/hooks/useReferenceData.js` | Hook — fetch instructors, vehicles, courses, students |
+
+### Design Patterns
+
+- All Airtable modules import table IDs from `constants.js` — never hardcoded inline
+- Formula and lookup fields are **read-only** — only writable fields are passed to create/update
+- `APPT_FIELDS` maps semantic names to Airtable field IDs; use it everywhere instead of raw IDs
 
 ## Data Flow
 
-<!-- TODO: Describe how data moves through the system -->
+```
+User Action (React UI)
+  → useAppointments / useReferenceData hook
+    → airtable/*.js module (appointments, courses, instructors, etc.)
+      → client.js (fetch wrapper with auth + pagination)
+        → Airtable REST API (base: appfmh7j77kCe8hy2)
+```
 
 ## Key Dependencies
 
 | Dependency | Purpose |
 |------------|---------|
 | Airtable | Primary data store (see Airtable Base below) |
+| React + Vite | Frontend framework for the appointment scheduling app |
 
 ## Airtable Base
 
 **Base:** Colonial Driving School - Carlos
 **Base ID:** `appfmh7j77kCe8hy2`
-**API Key env var:** `AIRTABLE_API_KEY` (see `.env`)
-**Last synced:** 2026-02-18 (live API — full field IDs verified, schema updated)
+**API Key env var:** `VITE_AIRTABLE_API_KEY` (in `app/.env`)
+**Last synced:** 2026-02-19 (live API — full field IDs verified, schema updated)
 
 ### Tables
 
@@ -62,16 +108,15 @@ All new tables were duplicated from **Template Table** and share the same 3 base
 
 | Table | ID | Status | Purpose |
 |-------|----|--------|---------|
-| Students | `tblpG4IVPaS8tq4bp` | Active (new) | Student records — being built out |
-| Courses | `tblthPfZN6r0FCD9P` | Active (new) | Course catalog (name, abbreviation, length, delivery type) |
+| Students | `tblpG4IVPaS8tq4bp` | Active (new) | Student records |
+| Courses | `tblthPfZN6r0FCD9P` | Active (new) | Course catalog (name, abbreviation, length, delivery type, age/tier/location options) |
 | Services | `tbl7hzYhb2kHDE7dg` | Active (new) | Services catalog (name, abbreviation) |
-| Prices | `tblDZMwgA9Ay0JbRA` | Active (new) | Pricing table — fully built out with course/service links, bundling, walk-in, versioning |
+| Prices | `tblDZMwgA9Ay0JbRA` | Active (new) | Pricing table — course/service links, bundling, walk-in, online |
 | Sales | `tbl0aRT60VhcLq06G` | Active (new) | Sales tracking — stub only, no fields yet beyond base 3 |
-| Appointments | `tblo5X0nETYrtQ6bI` | Active (new) | Appointment tracking — fully built out with student, instructor, vehicle, course links |
-| Instructors | `tblwm92MbaoRT2dSa` | Active (new) | Instructor records — stub only, no fields yet beyond base 3 |
-| Vehicles | `tblog7VBOinu5eVqp` | Active (new) | Vehicle tracking — has `Car Name` field |
+| Schedule | `tblo5X0nETYrtQ6bI` | Active (new) | Appointment scheduling — student, instructor, car, course links; PUDO, location, classroom (formerly named "Appointments") |
+| Instructors | `tblwm92MbaoRT2dSa` | Active (new) | Instructor records |
+| Cars | `tblog7VBOinu5eVqp` | Active (new) | Vehicle tracking — has `Car Name` field (formerly named "Vehicles" in docs) |
 | Availability | `tbl5db09IrQR5rmgU` | Active (new) | Instructor/resource availability — schedule and blockout records |
-| Emails | `tbl88z78Dd2sHDmeR` | Active (new) | Email management — stub only, no fields yet beyond base 3 |
 | Template Table | `tblsF8RF9pA0ndM3P` | Reference | Source template — do not delete |
 | Students - Old | `tblzt3omoGVGSfWTj` | Legacy (operational) | Current student records — enrollment, class dates, payment, status |
 | Courses - Old | `tblQbKtjmfN4RN28r` | Legacy (operational) | Current course catalog with abbreviations and pricing |
@@ -87,16 +132,16 @@ All new tables were duplicated from **Template Table** and share the same 3 base
 
 ### Key Relationships
 
-**New table relationships (live as of 2026-02-18):**
+**New table relationships (live as of 2026-02-19):**
 
 | From | Field | To | Inverse Field |
 |------|-------|----|---------------|
-| Students | Appointments (`fldcMrrWus0qxba8i`) | Appointments | Student (`fldSGS6xsegcdEklh`) |
-| Instructors | Appointments (`fldiMi2l98HdCCHAW`) | Appointments | Instructor (`fldtQT4tfTJ5FCm9T`) |
+| Students | Appointments (`fldcMrrWus0qxba8i`) | Schedule | Student (`fldSGS6xsegcdEklh`) |
+| Instructors | Appointments (`fldiMi2l98HdCCHAW`) | Schedule | Instructor (`fldtQT4tfTJ5FCm9T`) |
 | Instructors | Availability (`fldRTIb0HtZyZuhsL`) | Availability | Instructor (`fldUao9vyLTkkqAsh`) |
-| Vehicles | Appointments (`fldeQixDezXKvJc9F`) | Appointments | Vehicle (`fldPRZoDW0yAe2YwQ`) |
-| Vehicles | Availability (`fld8BXNxmFXw77aZZ`) | Availability | Vehicle (`fld6xoS3XDdBdX3Qd`) |
-| Courses | Appointments (`fldtOvjel2szfdL5o`) | Appointments | Course (`fldy84c9JSS2ris1w`) |
+| Cars | Appointments (`fldeQixDezXKvJc9F`) | Schedule | Cars (`fldPRZoDW0yAe2YwQ`) |
+| Cars | Availability (`fld8BXNxmFXw77aZZ`) | Availability | Vehicle (`fld6xoS3XDdBdX3Qd`) |
+| Courses | Appointments (`fldtOvjel2szfdL5o`) | Schedule | Course (`fldy84c9JSS2ris1w`) |
 | Courses | Prices (`fldzJJrWfRxAhTyec`) | Prices | Course Abreviation (`fldUbYGgKQqADUDSU`) |
 | Services | Prices (`fldRgo9irNEs8NwFR`) | Prices | Serivces Abreviation (`fldwNUHM1sjEiZTo4`) |
 
@@ -118,6 +163,7 @@ All new tables were duplicated from **Template Table** and share the same 3 base
 | Email | `fldGLUgpK7OhK09hf` | email | |
 | Guardian First Name | `fld1MkpVvhEpNM5Yx` | singleLineText | |
 | Guardian Last Name | `fldil8hf91KCEJiw4` | singleLineText | |
+| Guardian Relation | `fldbWdPSN5Nev2blX` | singleLineText | Relationship of guardian to student |
 | Guardian Phone | `fld6WORo9bVhoV0Js` | phoneNumber | |
 | Guardian Email | `fldVn5HpMzAIi1a13` | email | |
 | Address | `fldf1aK38wvLlWi0o` | singleLineText | |
@@ -133,14 +179,18 @@ All new tables were duplicated from **Template Table** and share the same 3 base
 | Abreviation | `fldHUdk9ITWQ6mSiV` | singleLineText | Short code — primary field (note: typo in field name) |
 | Name | `fldCWflJhm4TpgzaI` | singleLineText | Full course name |
 | Length | `fldzZ2kJsZPEi2dfr` | duration | h:mm format |
-| Classroom | `fldC13titqbm9wUrz` | checkbox | Delivered in classroom |
-| In Car | `fldPa8Fru1tuLqS60` | checkbox | Behind-the-wheel component |
-| Online | `fldz4r0qVUSzU64Uk` | checkbox | Online delivery option |
+| Age Options | `fldWr2bOGldhdpTOh` | multipleSelects | "T" (`selt54GaBqwlwleoH`) = Teen, "A" (`selF9kyGKXMeiNHH8`) = Adult |
+| Tier Options | `flduTGL79ThCqoHBH` | multipleSelects | "S" (`seloOQYDki8VoBLqC`), "EL" (`selpnEd6wU74Rv1zt`), "RL" (`selIJN8rLl7GKYcCJ`) |
+| Locations Options | `fldHv3fV08Vq5uyc8` | multipleSelects | "CH" (`selnomAuRRV5fsE6R`) = Colonial Heights, "GA" (`selgVKmnhhoUZYonU`) = Glen Allen |
+| Spanish Offered | `fld7UztUuJefSRKeQ` | checkbox | Whether this course can be taught in Spanish |
+| PUDO Offered | `fld4S7xmH4bmZ0su5` | checkbox | Whether pick-up/drop-off is offered for this course |
+| Additional Requirements | `fldoL83911YET3o6C` | multilineText | Free-form additional requirements notes |
+| Type | `fldldJ1rrd6dsaqRC` | singleSelect | "In Car" (`sel1YgWAIaKJ5JF05`), "Classroom" (`sel8NCA25JWV1aXTB`) |
 | Prices | `fldzJJrWfRxAhTyec` | multipleRecordLinks | Links to Prices (`tblDZMwgA9Ay0JbRA`) |
-| Appointments | `fldtOvjel2szfdL5o` | multipleRecordLinks | Links to Appointments (`tblo5X0nETYrtQ6bI`) |
-| Record ID | `fldq9cgq3G2z4UNfs` | formula | `RECORD_ID()` |
-| Created | `fldfzfxtnoGd0lHYk` | formula | `CREATED_TIME()` |
-| Last Modified | `fldHWfg97NjHNnUtl` | formula | `LAST_MODIFIED_TIME()` |
+| Appointments | `fldtOvjel2szfdL5o` | multipleRecordLinks | Links to Schedule (`tblo5X0nETYrtQ6bI`) |
+| Record ID | `fldq9cgq3G2z4UNfs` | formula | `RECORD_ID()` — read only |
+| Created | `fldfzfxtnoGd0lHYk` | formula | `CREATED_TIME()` — read only |
+| Last Modified | `fldHWfg97NjHNnUtl` | formula | `LAST_MODIFIED_TIME()` — read only |
 
 ### Services Fields
 
@@ -155,7 +205,7 @@ All new tables were duplicated from **Template Table** and share the same 3 base
 
 ### Availability Fields
 
-**Last verified:** 2026-02-18 (live API)
+**Last verified:** 2026-02-19 (live API)
 
 | Field | ID | Type | Notes |
 |-------|----|------|-------|
@@ -175,53 +225,65 @@ All new tables were duplicated from **Template Table** and share the same 3 base
 
 > Note: The Availability schema was rebuilt from the original 9-field design. Key changes: `Type`/`Week`/`Start Date`/`End Date` fields removed; replaced with `Status`, `Cadence`, `Repeate Until`, `Vehicle` link, and `Start`/`Shift Length`/`End`. Field names "Shift Start" and "Shift End" in prior docs were incorrect — actual Airtable names are "Start" and "End".
 
-### Appointments Fields
+### Schedule Fields
 
-**Last verified:** 2026-02-18 (live API)
+> Table was formerly named "Appointments" in docs. Airtable table name is now "Schedule" (`tblo5X0nETYrtQ6bI`).
+
+**Last verified:** 2026-02-19 (live API)
 
 | Field | ID | Type | Notes |
 |-------|----|------|-------|
-| Abreviation | `fldSsrlgL0Fhx6Ci4` | formula | Auto-generated label from linked records + Class Number |
-| Record ID | `fldlXk1OUtz0S8ghl` | formula | `RECORD_ID()` |
-| Created | `fldanniRebdEOza0d` | formula | `CREATED_TIME()` |
-| Last Modified | `fldCKn1xYAQ8BBnve` | formula | `LAST_MODIFIED_TIME()` |
+| Abreviation | `fldSsrlgL0Fhx6Ci4` | formula | Instructor + Student + Cars + Course + Class Number — primary display; read only |
 | Student | `fldSGS6xsegcdEklh` | multipleRecordLinks | Links to Students (`tblpG4IVPaS8tq4bp`) |
-| Instructor | `fldtQT4tfTJ5FCm9T` | multipleRecordLinks | Links to Instructors (`tblwm92MbaoRT2dSa`) |
-| Vehicle | `fldPRZoDW0yAe2YwQ` | multipleRecordLinks | Links to Vehicles (`tblog7VBOinu5eVqp`) |
 | Course | `fldy84c9JSS2ris1w` | multipleRecordLinks | Links to Courses (`tblthPfZN6r0FCD9P`) |
-| Name (from Course) | `fldUeLt9UGlCM2L46` | multipleLookupValues | Lookup: Course.Name |
-| Length (from Course) | `fldv3IBKE2TiYhAhX` | multipleLookupValues | Lookup: Course.Length (used in End formula) |
-| PUDU | `fld6nShioyE8NGlKH` | duration | Pick-up/drop-off time added to course length |
-| Start | `fldSEIbrQiwpMhwB4` | dateTime | Appointment start datetime |
-| End | `fldA4Cct6GbdTJf9v` | formula | `DATEADD({Start}, ({Length (from Course)} + 2*{PUDU})/60, 'minutes')` |
+| Instructor | `fldtQT4tfTJ5FCm9T` | multipleRecordLinks | Links to Instructors (`tblwm92MbaoRT2dSa`) |
+| Type (from Course) | `fldGxc1NcZ2YaII67` | multipleLookupValues | Lookup: Course.Type — "In Car" (`sel1YgWAIaKJ5JF05`) / "Classroom" (`sel8NCA25JWV1aXTB`); read only |
+| Cars | `fldPRZoDW0yAe2YwQ` | multipleRecordLinks | Links to Cars (`tblog7VBOinu5eVqp`) |
+| Classroom | `flduE85AAa1DBFLtv` | singleSelect | "Class Room 1" (`selIjC2WTOnLTrk8z`), "Class Room 2" (`sel1YzU4ymsGzlIIP`) |
+| Name (from Course) | `fldUeLt9UGlCM2L46` | multipleLookupValues | Lookup: Course.Name — read only |
+| Locations Options (from Course) | `fldxfTefJ4xSiSU4O` | multipleLookupValues | Lookup: Course.Locations Options — "CH" / "GA"; read only |
+| Location | `fldkQZ5XXOZTqXPlm` | singleSelect | "CH" (`selPdzvazKRfWYRRL`) = Colonial Heights, "GA" (`selUXvKoLoACASQYG`) = Glen Allen |
+| Age Options (from Course) | `fld9fUgLPziU5WiUb` | multipleLookupValues | Lookup: Course.Age Options — "T" / "A"; read only |
+| Age | `fldhdQS61vRqqbVJc` | singleSelect | "T" (`sel9nKw5tnRPpY8qC`) = Teen, "A" (`selC4gRIi0It7DRqO`) = Adult |
+| Tier Options (from Course) | `fldVFu0EN6v19tSPZ` | multipleLookupValues | Lookup: Course.Tier Options — "S" / "EL" / "RL"; read only |
+| Tier | `fldWMcjKhn1y7INxi` | singleSelect | "EL" (`selsRh2uHNRU15pIF`), "RL" (`selj5NjQlGb5U3bSh`) |
+| Spanish Offered (from Course) | `fldj52kkWsaDd1pyy` | multipleLookupValues | Lookup: Course.Spanish Offered — read only |
+| Spanish | `fld17lzRvlLbFdUa4` | checkbox | Whether this appointment is in Spanish |
+| PUDO Offered (from Course) | `fldKi9AiTLgUj9cYL` | multipleLookupValues | Lookup: Course.PUDO Offered — read only |
+| PUDO | `fld6nShioyE8NGlKH` | singleSelect | Pick-up/drop-off duration: "0:30" (`selkr4YTe8RGnbGTx`), "1:00" (`selmtSjiFUkrW58lB`) |
+| Start | `fldSEIbrQiwpMhwB4` | dateTime | Appointment start datetime (America/New_York, 12hr) |
+| Pickup At | `fldOFlvxOnqvJAYEz` | formula | `IF({PUDO}=BLANK(), BLANK(), DATEADD({Start}, SWITCH({PUDO}, "0:30", 30, "1:00", 60, 0), "minutes"))` — read only |
+| Length (from Course) | `fldv3IBKE2TiYhAhX` | multipleLookupValues | Lookup: Course.Length (used in End formula) — read only |
+| Dropoff At | `fldsPG5OdcFDuleX1` | formula | `IF({PUDO}=BLANK(), BLANK(), DATEADD({End}, -SWITCH({PUDO}, "0:30", 30, "1:00", 60, 0), "minutes"))` — read only |
+| End | `fldA4Cct6GbdTJf9v` | formula | `DATEADD({Start}, ({Length (from Course)}/60) + 2*SWITCH({PUDO}, "0:30", 30, "1:00", 60, 0), "minutes")` — read only |
 | Class Number | `fldw5sIWilBYqwQdl` | number | Sequential class number within student's enrollment |
-| Location | `fldkQZ5XXOZTqXPlm` | singleSelect | "Colonial Heights" (`selPdzvazKRfWYRRL`), "Glen Allen" (`selUXvKoLoACASQYG`) |
 | Notes | `fldwDBhLucKlzEiMu` | singleLineText | Free-form notes |
+| Record ID | `fldlXk1OUtz0S8ghl` | formula | `RECORD_ID()` — read only |
+| Created | `fldanniRebdEOza0d` | formula | `CREATED_TIME()` — read only |
+| Last Modified | `fldCKn1xYAQ8BBnve` | formula | `LAST_MODIFIED_TIME()` — read only |
 
 ### Prices Fields
 
-**Last verified:** 2026-02-18 (live API)
+**Last verified:** 2026-02-19 (live API)
 
 | Field | ID | Type | Notes |
 |-------|----|------|-------|
-| Abreviation | `fldR6jrxy6CgVSDgg` | formula | `{Course or Service abbrev} + optional "- xN" bundling + optional "- WI" walk-in` — primary display |
-| Unique Abreviation | `flddBnjfDq6jA02Eu` | formula | `{Abreviation} & " - v" & {Version}` — unique key |
+| Abreviation | `fldR6jrxy6CgVSDgg` | formula | `IF({Course Abreviation}, {Course Abreviation}, {Serivces Abreviation}) & IF({Bundled} > 1, " - x" & {Bundled}, "") & IF({Walk In}, " - WI", "")` — primary display; read only |
 | Price | `fldQY9R3T9OfZXQCi` | currency | USD |
 | Course Abreviation | `fldUbYGgKQqADUDSU` | multipleRecordLinks | Links to Courses (`tblthPfZN6r0FCD9P`) — use for course-based prices |
-| Name (from Course Abreviation) | `fld6TX4iuix5RruRU` | multipleLookupValues | Lookup: Course.Name |
+| Name (from Course Abreviation) | `fld6TX4iuix5RruRU` | multipleLookupValues | Lookup: Course.Name — read only |
 | Serivces Abreviation | `fldwNUHM1sjEiZTo4` | multipleRecordLinks | Links to Services (`tbl7hzYhb2kHDE7dg`) — use for service-based prices (note: "Serivces" typo is in Airtable) |
-| Name (from Serivces Abreviation) | `fldctfTJ5yxqKLp1z` | multipleLookupValues | Lookup: Service.Name |
+| Name (from Serivces Abreviation) | `fldctfTJ5yxqKLp1z` | multipleLookupValues | Lookup: Service.Name — read only |
 | Bundled | `fldaMNQIpYZ92qKMS` | number | Number of sessions/classes bundled (1 = not bundled) |
 | Walk In | `fldpxwNOWpBOT1jaj` | checkbox | Whether this is a walk-in rate |
-| Expires On | `fldFJBRsc0HsQ1b5B` | date | Price expiration date |
-| Version | `fldkiXmQOzxa96vi9` | number | Version number for price history tracking |
-| Record ID | `fldAR9xHQJb7p1lXd` | formula | `RECORD_ID()` |
-| Created | `fldphcOKarPLlsfG5` | formula | `CREATED_TIME()` |
-| Last Modified | `fldREcxqUQsf8usb6` | formula | `LAST_MODIFIED_TIME()` |
+| Online | `fldCKDoIQ33mZR3E6` | checkbox | Whether this is an online rate |
+| Record ID | `fldAR9xHQJb7p1lXd` | formula | `RECORD_ID()` — read only |
+| Created | `fldphcOKarPLlsfG5` | formula | `CREATED_TIME()` — read only |
+| Last Modified | `fldREcxqUQsf8usb6` | formula | `LAST_MODIFIED_TIME()` — read only |
 
 ### Instructors Fields
 
-**Last verified:** 2026-02-18 (live API)
+**Last verified:** 2026-02-19 (live API)
 
 | Field | ID | Type | Notes |
 |-------|----|------|-------|
@@ -255,18 +317,20 @@ All new tables were duplicated from **Template Table** and share the same 3 base
 | `recrn3q7j3YKWT871` | Heather | Heather | Office Admin |
 | `recxnBQMHW8mF3Xlb` | Mr. O | Mr. O | Instructor (Spanish) |
 
-### Vehicles Fields
+### Cars Fields
 
-**Last verified:** 2026-02-18 (live API)
+> Table was formerly named "Vehicles" in docs. Airtable table name is "Cars" (`tblog7VBOinu5eVqp`).
+
+**Last verified:** 2026-02-19 (live API)
 
 | Field | ID | Type | Notes |
 |-------|----|------|-------|
 | Car Name | `flduaHxeUe18Y09DP` | singleLineText | Vehicle identifier — primary display field |
 | Availability | `fld8BXNxmFXw77aZZ` | multipleRecordLinks | Links to Availability (`tbl5db09IrQR5rmgU`) |
-| Appointments | `fldeQixDezXKvJc9F` | multipleRecordLinks | Links to Appointments (`tblo5X0nETYrtQ6bI`) |
-| Record ID | `fldl8uW24SY3uw5w2` | formula | `RECORD_ID()` |
-| Created | `fldayxd5oACHqXZfU` | formula | `CREATED_TIME()` |
-| Last Modified | `fldCVxWL8ZfbdZcKV` | formula | `LAST_MODIFIED_TIME()` |
+| Appointments | `fldeQixDezXKvJc9F` | multipleRecordLinks | Links to Schedule (`tblo5X0nETYrtQ6bI`) |
+| Record ID | `fldl8uW24SY3uw5w2` | formula | `RECORD_ID()` — read only |
+| Created | `fldayxd5oACHqXZfU` | formula | `CREATED_TIME()` — read only |
+| Last Modified | `fldCVxWL8ZfbdZcKV` | formula | `LAST_MODIFIED_TIME()` — read only |
 
 #### Vehicle Records (all current)
 

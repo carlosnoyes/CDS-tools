@@ -6,30 +6,63 @@ export const TABLES = {
   instructors:  "tblwm92MbaoRT2dSa",
   vehicles:     "tblog7VBOinu5eVqp",
   courses:      "tblthPfZN6r0FCD9P",
+  availability: "tbl5db09IrQR5rmgU",
+};
+
+// Availability field names (stored by name, not ID, for this table)
+export const AVAIL_FIELDS = {
+  instructor:   "Instructor",    // multipleRecordLinks → Instructors
+  vehicle:      "Vehicle",       // multipleRecordLinks → Cars
+  status:       "Status",        // singleSelect: "Scheduled" | "Blocked Off"
+  start:        "Start",         // dateTime (ISO string)
+  shiftLength:  "Shift Length",  // number (seconds)
+  end:          "End",           // dateTime formula (read-only)
+  cadence:      "Cadence",       // singleSelect: "Weekly" | "Bi-Weekly"
+  repeateUntil: "Repeate Until", // date (typo baked into Airtable)
 };
 
 // Appointments field IDs
 // Formula/lookup fields are read-only — never write to them
 export const APPT_FIELDS = {
-  abbreviation:       "fldSsrlgL0Fhx6Ci4",  // formula — read only
-  recordId:           "fldlXk1OUtz0S8ghl",  // formula — read only
-  created:            "fldanniRebdEOza0d",  // formula — read only
-  lastModified:       "fldCKn1xYAQ8BBnve",  // formula — read only
-  student:            "fldSGS6xsegcdEklh",  // multipleRecordLinks → Students
-  instructor:         "fldtQT4tfTJ5FCm9T",  // multipleRecordLinks → Instructors
-  vehicle:            "fldPRZoDW0yAe2YwQ",  // multipleRecordLinks → Vehicles
-  course:             "fldy84c9JSS2ris1w",  // multipleRecordLinks → Courses
-  courseNameLookup:   "fldUeLt9UGlCM2L46",  // lookup — read only
-  courseLengthLookup: "fldv3IBKE2TiYhAhX",  // lookup (seconds) — read only
-  pudu:               "fld6nShioyE8NGlKH",  // duration (seconds)
-  start:              "fldSEIbrQiwpMhwB4",  // dateTime (ISO string)
-  end:                "fldA4Cct6GbdTJf9v",  // formula — read only
-  classNumber:        "fldw5sIWilBYqwQdl",  // number
-  location:           "fldkQZ5XXOZTqXPlm",  // singleSelect
-  notes:              "fldwDBhLucKlzEiMu",  // singleLineText
+  // System / formula — read only
+  abbreviation:           "fldSsrlgL0Fhx6Ci4",
+  recordId:               "fldlXk1OUtz0S8ghl",
+  created:                "fldanniRebdEOza0d",
+  lastModified:           "fldCKn1xYAQ8BBnve",
+  end:                    "fldA4Cct6GbdTJf9v",
+  pickupAt:               "fldOFlvxOnqvJAYEz",
+  dropoffAt:              "fldsPG5OdcFDuleX1",
+
+  // Lookup fields — read only (pulled from linked Course)
+  courseNameLookup:       "fldUeLt9UGlCM2L46",
+  courseLengthLookup:     "fldv3IBKE2TiYhAhX",
+  courseTypeLookup:       "fldGxc1NcZ2YaII67",   // "In Car" | "Classroom"
+  ageOptionsLookup:       "fld9fUgLPziU5WiUb",   // multiselect values: "T", "A"
+  tierOptionsLookup:      "fldVFu0EN6v19tSPZ",   // multiselect values: "EL", "RL"
+  locationsOptionsLookup: "fldxfTefJ4xSiSU4O",   // multiselect values: "CH", "GA"
+  spanishOfferedLookup:   "fldj52kkWsaDd1pyy",   // boolean lookup
+  pudoOfferedLookup:      "fldKi9AiTLgUj9cYL",   // boolean lookup
+
+  // Writable fields
+  student:      "fldSGS6xsegcdEklh",  // multipleRecordLinks → Students
+  instructor:   "fldtQT4tfTJ5FCm9T",  // multipleRecordLinks → Instructors
+  cars:         "fldPRZoDW0yAe2YwQ",  // multipleRecordLinks → Cars
+  course:       "fldy84c9JSS2ris1w",  // multipleRecordLinks → Courses
+  start:        "fldSEIbrQiwpMhwB4",  // dateTime (ISO string)
+  classNumber:  "fldw5sIWilBYqwQdl",  // number
+  notes:        "fldwDBhLucKlzEiMu",  // singleLineText
+  // Conditional writable fields (shown/hidden based on Course type)
+  classroom:    "flduE85AAa1DBFLtv",  // singleSelect: "Class Room 1", "Class Room 2"
+  age:          "fldhdQS61vRqqbVJc",  // singleSelect: "T", "A"
+  tier:         "fldWMcjKhn1y7INxi",  // singleSelect: "EL", "RL"
+  location:     "fldkQZ5XXOZTqXPlm",  // singleSelect: "CH", "GA"
+  spanish:      "fld17lzRvlLbFdUa4",  // checkbox
+  pudo:         "fld6nShioyE8NGlKH",  // singleSelect: "0:30", "1:00"
 };
 
-export const LOCATIONS = ["Colonial Heights", "Glen Allen"];
+export const CLASSROOMS = ["Class Room 1", "Class Room 2"];
+export const PUDO_OPTIONS = ["0:30", "1:00"];
+export const LOCATION_LABELS = { CH: "Colonial Heights", GA: "Glen Allen" };
 
 // Instructor record IDs in stable order for consistent color assignment
 export const INSTRUCTOR_ORDER = [

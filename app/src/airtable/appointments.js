@@ -6,10 +6,7 @@ const TABLE = TABLES.appointments;
 // Fetch appointments whose Start falls within [weekStart, weekEnd)
 // weekStart and weekEnd should be ISO date strings (e.g. "2026-01-05")
 export async function fetchAppointments(weekStart, weekEnd) {
-  const formula = `AND(
-    IS_SAME_OR_AFTER({Start}, "${weekStart}"),
-    IS_BEFORE({Start}, "${weekEnd}")
-  )`;
+  const formula = `AND({Start} >= "${weekStart}", {Start} < "${weekEnd}")`;
   return fetchAll(TABLE, { filterByFormula: formula });
 }
 

@@ -1,13 +1,18 @@
-import { HOUR_LABELS, PX_PER_HOUR } from "@/utils/time";
+import { HOUR_LABELS, DAY_START_HOUR } from "@/utils/time";
 
-export default function TimeGutter() {
+export default function TimeGutter({ pxPerHour }) {
+  const totalHeight = HOUR_LABELS.length * pxPerHour;
+
   return (
-    <div className="relative" style={{ height: HOUR_LABELS.length * PX_PER_HOUR }}>
+    <div
+      className="relative select-none"
+      style={{ height: totalHeight }}
+    >
       {HOUR_LABELS.map(({ hour, label }) => (
         <div
           key={hour}
           className="absolute right-2 text-xs text-muted-foreground"
-          style={{ top: (hour - HOUR_LABELS[0].hour) * PX_PER_HOUR - 8 }}
+          style={{ top: (hour - DAY_START_HOUR) * pxPerHour - 8 }}
         >
           {label}
         </div>

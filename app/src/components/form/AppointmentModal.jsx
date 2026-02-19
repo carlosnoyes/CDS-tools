@@ -12,7 +12,8 @@ export default function AppointmentModal({
   onOpenChange,
   record,
   refData,
-  weekStart,
+  startDate,
+  endDate,
 }) {
   const isEdit = !!record;
 
@@ -29,7 +30,7 @@ export default function AppointmentModal({
               {isEdit ? "Edit Appointment" : "New Appointment"}
             </DialogTitle>
             {isEdit && (
-              <DeleteButton record={record} weekStart={weekStart} onClose={close} />
+              <DeleteButton record={record} startDate={startDate} endDate={endDate} onClose={close} />
             )}
           </div>
         </DialogHeader>
@@ -38,7 +39,8 @@ export default function AppointmentModal({
           record={record}
           refData={refData}
           onClose={close}
-          weekStart={weekStart}
+          startDate={startDate}
+          endDate={endDate}
         />
       </DialogContent>
     </Dialog>

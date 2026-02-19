@@ -15,7 +15,9 @@ const headers = {
 async function handleResponse(res) {
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Airtable ${res.status}: ${text}`);
+    const msg = `Airtable ${res.status}: ${text}`;
+    console.error(msg);
+    throw new Error(msg);
   }
   return res.json();
 }
