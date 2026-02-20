@@ -13,6 +13,7 @@ export const TABLES = {
 export const AVAIL_FIELDS = {
   instructor:   "Instructor",    // multipleRecordLinks → Instructors
   vehicle:      "Vehicle",       // multipleRecordLinks → Cars
+  location:     "Location",      // singleSelect: "CH" | "GA"
   status:       "Status",        // singleSelect: "Scheduled" | "Blocked Off"
   start:        "Start",         // dateTime (ISO string)
   shiftLength:  "Shift Length",  // number (seconds)

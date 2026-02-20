@@ -252,6 +252,18 @@ CDS needs a web UI to view and manage driving appointments stored in Airtable. T
 - [x] When the Date field changes in the sidebar, the calendar navigates to the week containing that date
 - [x] Table view continues to use the existing modal dialog (AppointmentModal unchanged)
 
+### Phase 19 — Availability Location
+
+- [x] Add `Location` field (`fld3hPPZq6RjQfEHo`) to `AVAIL_FIELDS` in `constants.js`
+- [x] Update `expandAvailability()` in `availability.js` — carry `location` through into each `{ instructorId, vehicleId, location, startMs, endMs }` interval
+- [x] Update `AvailabilityOverlay`: show location as a third inline text line (below car name, when strip is tall enough); add to tooltip: `{Instructor}\n{Car}\n{Location}\n{Start – End}`
+- [x] Update `AvailabilityOverlay` click handler: include `locationId: iv.location` in the `onClickTime` payload
+- [x] Update `CalendarPage` / `DayColumn` / `AvailabilityOverlay` call chain: pass `locationId` through `onClickTime` context; include `locationId` in `prefill` passed to `AppointmentForm`
+- [x] Update `AppointmentForm.defaultValues()` create path: use `prefill.locationId` to pre-fill `Location` field
+- [x] Add **W3** to `conflicts.js`: instructor's covering availability window has a different location than the selected appointment location — orange warning, does not block submit
+- [x] Add **W4** to `conflicts.js`: instructor has another appointment on the same day at a different location within 30 min travel buffer — orange warning, does not block submit
+- [x] Wire W3/W4 into `AppointmentForm` — same pattern as W1/W2: run checks eagerly on Instructor, Date, Start Time, Location changes; surface warnings in the form
+
 ## Constraints
 
 - Airtable API key goes in `app/.env` as `VITE_AIRTABLE_API_KEY` (Vite prefix required for browser exposure)

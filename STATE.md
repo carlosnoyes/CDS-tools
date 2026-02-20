@@ -59,6 +59,8 @@
 - `Age`, `Tier`, `Spanish`, `PUDO` (schedule-level): new singleSelect/checkbox fields set per appointment
 - Corresponding `**(from Course)**` lookup fields pull allowed values from linked course
 - `Abreviation`: auto-formula combining Instructor + Student + Car + Course + Class Number
+- `Canceled` (`fld4sG95vpTu5jnbk`, checkbox): whether the appointment was canceled — added 2026-02-20
+- `No Show` (`fldhYZ5TjHhDI8WVy`, checkbox): whether the student was a no-show — added 2026-02-20
 
 ## Prices — Schema (updated 2026-02-19)
 

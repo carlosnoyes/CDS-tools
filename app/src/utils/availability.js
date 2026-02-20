@@ -21,6 +21,7 @@ export function expandAvailability(records, targetDate) {
 
     const instructorId = f.Instructor?.[0] ?? null;
     const vehicleId    = f.Vehicle?.[0]    ?? null;
+    const location     = f.Location        ?? null;
     const status       = f.Status          ?? "";
     const cadence      = f.Cadence         ?? "Weekly";
     const repeateUntil = f["Repeate Until"] ? parseISO(f["Repeate Until"]) : null;
@@ -29,7 +30,7 @@ export function expandAvailability(records, targetDate) {
     const occurrence = getOccurrenceOnDate(f.Start, f["Shift Length"], cadence, repeateUntil, targetDate);
     if (!occurrence) continue;
 
-    const entry = { instructorId, vehicleId, startMs: occurrence.startMs, endMs: occurrence.endMs };
+    const entry = { instructorId, vehicleId, location, startMs: occurrence.startMs, endMs: occurrence.endMs };
 
     if (status === "Scheduled")    scheduled.push(entry);
     if (status === "Blocked Off")  blocked.push(entry);

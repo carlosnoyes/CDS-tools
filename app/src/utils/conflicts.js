@@ -38,6 +38,7 @@ function overlappingAppts(allAppts, startISO, endMs, skipId) {
   return allAppts.filter((a) => {
     if (a.id === skipId) return false;
     if (!a.fields.Start || !a.fields.End) return false;
+    if (a.fields.Canceled || a.fields["No Show"]) return false;
     const aStart = new Date(a.fields.Start).getTime();
     const aEnd   = new Date(a.fields.End).getTime();
     return overlaps(propStart, endMs, aStart, aEnd);
@@ -111,16 +112,17 @@ export function checkCarConflict(allAppts, { startISO, endMs, carId, skipId, ref
 /**
  * W1 — Instructor not available at the proposed time.
  * W2 — Selected car not in instructor's availability window.
+ * W3 — Instructor scheduled at a different location than the appointment.
  *
  * Returns an array of warning objects (severity: "warning").
  * Warnings do not block submission — they are surfaced in orange.
  *
  * @param {Array} availIntervals - Output of expandAvailability(records, targetDate)
- *   Each entry: { instructorId, vehicleId, startMs, endMs }
- * @param {object} formValues - { startISO, endMs, instructorId, carId }
+ *   Each entry: { instructorId, vehicleId, location, startMs, endMs }
+ * @param {object} formValues - { startISO, endMs, instructorId, carId, location }
  * @param {object} refData
  */
-export function checkAvailabilityWarnings(availIntervals, { startISO, endMs, instructorId, carId }, refData) {
+export function checkAvailabilityWarnings(availIntervals, { startISO, endMs, instructorId, carId, location }, refData) {
   if (!instructorId || !startISO || !endMs) return [];
 
   const propStart = new Date(startISO).getTime();
@@ -179,6 +181,17 @@ export function checkAvailabilityWarnings(availIntervals, { startISO, endMs, ins
     });
   }
 
+  // W3 — instructor's covering window is at a different location than selected
+  if (location && coveringWindow.location && location !== coveringWindow.location) {
+    const instructorName = refData.instructorMap[instructorId]?.["Full Name"] ?? "This instructor";
+    warnings.push({
+      type: "W3",
+      severity: "warning",
+      fields: ["Location", "Instructor"],
+      message: `${instructorName} is scheduled at ${coveringWindow.location} at this time, not ${location}.`,
+    });
+  }
+
   return warnings;
 }
 
@@ -193,6 +206,85 @@ export function getAvailabilityCar(availIntervals, startISO, endMs, instructorId
     (w) => w.instructorId === instructorId && w.startMs <= propStart && w.endMs >= endMs
   );
   return window?.vehicleId ?? null;
+}
+
+/**
+ * Given availability records and a proposed start time, find the location linked to
+ * the instructor's covering availability window (if any). Returns location string or null.
+ */
+export function getAvailabilityLocation(availIntervals, startISO, endMs, instructorId) {
+  if (!instructorId || !startISO || !endMs) return null;
+  const propStart = new Date(startISO).getTime();
+  const window = availIntervals.find(
+    (w) => w.instructorId === instructorId && w.startMs <= propStart && w.endMs >= endMs
+  );
+  return window?.location ?? null;
+}
+
+const TRAVEL_BUFFER_MS = 30 * 60 * 1000; // 30 minutes
+
+/**
+ * W4 — Instructor traveling between two different locations without a 30-minute buffer.
+ *
+ * Looks at all existing (non-canceled, non-no-show) appointments for the instructor
+ * on the same day that are at a different location and are within TRAVEL_BUFFER_MS
+ * of the proposed appointment's time window.
+ *
+ * Returns a warning object or null.
+ *
+ * @param {Array} allAppts - Full appointment cache
+ * @param {object} params - { startISO, endMs, instructorId, location, skipId }
+ * @param {object} refData
+ */
+export function checkLocationTravelWarning(allAppts, { startISO, endMs, instructorId, location, skipId }, refData) {
+  if (!instructorId || !startISO || !endMs || !location) return null;
+
+  const propStart = new Date(startISO).getTime();
+
+  // Get all instructor appointments on the same day (not canceled/no-show, not self)
+  const instructorAppts = allAppts.filter((a) => {
+    if (a.id === skipId) return false;
+    if (!a.fields.Start || !a.fields.End) return false;
+    if (a.fields.Canceled || a.fields["No Show"]) return false;
+    if (a.fields.Instructor?.[0] !== instructorId) return false;
+    if (!a.fields.Location || a.fields.Location === location) return false;
+    // Same calendar day
+    const aDay = new Date(a.fields.Start).toDateString();
+    const propDay = new Date(startISO).toDateString();
+    return aDay === propDay;
+  });
+
+  for (const a of instructorAppts) {
+    const aStart = new Date(a.fields.Start).getTime();
+    const aEnd   = new Date(a.fields.End).getTime();
+    const otherLocation = a.fields.Location;
+
+    // Existing appointment ends too close before proposed start
+    if (aEnd <= propStart && propStart - aEnd < TRAVEL_BUFFER_MS) {
+      const time = new Date(aEnd).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      const instructorName = refData.instructorMap[instructorId]?.["Full Name"] ?? "This instructor";
+      return {
+        type: "W4",
+        severity: "warning",
+        fields: ["Instructor", "startDate", "startTime"],
+        message: `${instructorName} has an appointment at ${otherLocation} ending at ${time} — less than 30 min travel buffer.`,
+      };
+    }
+
+    // Existing appointment starts too close after proposed end
+    if (aStart >= endMs && aStart - endMs < TRAVEL_BUFFER_MS) {
+      const time = new Date(aStart).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      const instructorName = refData.instructorMap[instructorId]?.["Full Name"] ?? "This instructor";
+      return {
+        type: "W4",
+        severity: "warning",
+        fields: ["Instructor", "startDate", "startTime"],
+        message: `${instructorName} has an appointment at ${otherLocation} starting at ${time} — less than 30 min travel buffer.`,
+      };
+    }
+  }
+
+  return null;
 }
 
 /**

@@ -27,9 +27,11 @@ export default function AppointmentBlock({
     height = Math.max(20, durationHours * pxPerHour);
   }
 
+  const isNoShow = !!f["No Show"];
+
   return (
     <div
-      onClick={() => onClick(appt)}
+      onClick={(e) => { e.stopPropagation(); onClick(appt); }}
       title={`${instructorName} — ${studentName}\n${courseName}\n${formatTime(f.Start)}${f.End ? " – " + formatTime(f.End) : ""}`}
       style={{
         position: "absolute",
@@ -42,6 +44,7 @@ export default function AppointmentBlock({
         cursor: "pointer",
         overflow: "hidden",
         boxSizing: "border-box",
+        opacity: isNoShow ? 0.45 : 1,
       }}
       className="rounded-sm px-1.5 py-0.5 hover:brightness-95 transition-all"
     >

@@ -31,10 +31,12 @@ export default function CalendarPage() {
   const yearStart = startOfYear(anchor);
   const yearEnd   = addDays(endOfYear(anchor), 1);
   const { data: appointments = [], isLoading, isError } = useAppointments(yearStart, yearEnd);
+  // Canceled appointments are hidden from the calendar; No Show appointments stay but are grayed out
+  const visibleAppointments = appointments.filter((a) => !a.fields.Canceled);
   const refData = useReferenceData();
   const { data: availabilityRecords = [] } = useAvailability();
 
-  // ctx = { time: Date, instructorId, carId } from DayColumn click, or null from "New" button
+  // ctx = { time: Date, instructorId, carId, locationId } from DayColumn click, or null from "New" button
   function openCreate(ctx) {
     setEditRecord(null);
     if (ctx?.time) {
@@ -44,6 +46,7 @@ export default function CalendarPage() {
         startTime: String(t.getHours()).padStart(2, "0") + ":00",
         instructorId: ctx.instructorId ?? null,
         carId: ctx.carId ?? null,
+        locationId: ctx.locationId ?? null,
       });
     } else {
       setPrefill(null);
@@ -120,7 +123,7 @@ export default function CalendarPage() {
         <CalendarGrid
           anchor={anchor}
           scrollTarget={scrollTarget}
-          appointments={appointments}
+          appointments={visibleAppointments}
           refData={refData}
           availabilityRecords={availabilityRecords}
           pxPerHour={pxPerHour}
@@ -143,7 +146,7 @@ export default function CalendarPage() {
       {popoutDay && (
         <DayPopout
           day={popoutDay}
-          appointments={appointments}
+          appointments={visibleAppointments}
           refData={refData}
           availabilityRecords={availabilityRecords}
           onEdit={openEdit}

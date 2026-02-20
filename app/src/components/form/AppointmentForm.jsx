@@ -9,7 +9,7 @@ import LinkedSelect from "./LinkedSelect";
 import { CLASSROOMS, PUDO_OPTIONS, LOCATION_LABELS } from "@/utils/constants";
 import { useCreateAppointment, useUpdateAppointment, useAppointments } from "@/hooks/useAppointments";
 import { useAvailability } from "@/hooks/useAvailability";
-import { detectConflicts, checkAvailabilityWarnings, getAvailabilityCar } from "@/utils/conflicts";
+import { detectConflicts, checkAvailabilityWarnings, getAvailabilityCar, getAvailabilityLocation, checkLocationTravelWarning } from "@/utils/conflicts";
 import { expandAvailability } from "@/utils/availability";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -66,7 +66,7 @@ function defaultValues(record, prefill) {
   if (!record) {
     return {
       pudo: "", classNumber: "", Notes: "",
-      Classroom: "", Tier: "", Location: "", Spanish: false,
+      Classroom: "", Tier: "", Location: prefill?.locationId ?? "", Spanish: false,
       startDate:  prefill?.startDate  ?? todayStr(),
       startTime:  prefill?.startTime  ?? "08:00",
       Instructor: prefill?.instructorId ?? "",
@@ -89,6 +89,8 @@ function defaultValues(record, prefill) {
     Location:    f.Location        ?? "",
     Spanish:     f.Spanish         ?? false,
     pudo:        pudoFromSeconds(f.PUDO),
+    Canceled:    f.Canceled        ?? false,
+    "No Show":   f["No Show"]      ?? false,
   };
 }
 
@@ -108,6 +110,8 @@ function buildFields(data, { isInCar, isClassroom, tierOptions, locOptions, span
   if (locOptions.length)   fields.Location = data.Location || undefined;
   if (spanishOffered)   fields.Spanish   = !!data.Spanish;
   if (pudoOffered)      fields.PUDO      = pudoToSeconds(data.pudo) ?? undefined;
+  fields.Canceled   = !!data.Canceled;
+  fields["No Show"] = !!data["No Show"];
   Object.keys(fields).forEach((k) => { if (fields[k] === undefined) delete fields[k]; });
   return fields;
 }
@@ -115,7 +119,7 @@ function buildFields(data, { isInCar, isClassroom, tierOptions, locOptions, span
 // ─── Shared form fields panel ─────────────────────────────────────────────────
 // Renders all the form controls. Used for both single and bulk draft panels.
 
-function AppointmentFields({ form, refData, courseFlags, courseLengthSec, conflictByField = {}, warningByField = {} }) {
+function AppointmentFields({ form, refData, courseFlags, courseLengthSec, conflictByField = {}, warningByField = {}, isEdit = false }) {
   const { register, setValue, watch, formState: { errors } } = form;
   const { isInCar, isClassroom, isNumbered, tierOptions, locOptions, spanishOffered, pudoOffered } = courseFlags;
 
@@ -264,6 +268,20 @@ function AppointmentFields({ form, refData, courseFlags, courseLengthSec, confli
         </div>
       )}
 
+      {isEdit && (
+        <div className="flex items-center gap-2 pt-1">
+          <input id="Canceled" type="checkbox" className="w-4 h-4 accent-destructive" {...register("Canceled")} />
+          <Label htmlFor="Canceled" className="text-destructive">Canceled</Label>
+        </div>
+      )}
+
+      {isEdit && (
+        <div className="flex items-center gap-2 pt-1">
+          <input id="NoShow" type="checkbox" className="w-4 h-4 accent-primary" {...register("No Show")} />
+          <Label htmlFor="NoShow">No Show</Label>
+        </div>
+      )}
+
       <div className="col-span-2 space-y-1">
         <Label htmlFor="Notes">Notes</Label>
         <Input id="Notes" placeholder="Optional notes..." {...register("Notes")} />
@@ -348,6 +366,7 @@ export default function AppointmentForm({ record, prefill, refData, onClose, sta
   // 9 — Conflict detection (eager, runs off watched values)
   const instructorId = watchBase("Instructor");
   const carId        = watchBase("Cars");
+  const locationVal  = watchBase("Location");
   const startDate_   = watchBase("startDate");
   const startTime_   = watchBase("startTime");
   const pudoVal      = watchBase("pudo");
@@ -413,13 +432,30 @@ export default function AppointmentForm({ record, prefill, refData, onClose, sta
   }, [baseStartISO, courseLengthSec, pudoVal]);
 
   const warnings = useMemo(() => {
-    if (!baseStartISO || !baseEndMs || !isInCar) return [];
-    return checkAvailabilityWarnings(
-      availIntervalsForDate,
-      { startISO: baseStartISO, endMs: baseEndMs, instructorId, carId },
+    const w = [];
+    if (baseStartISO && baseEndMs && isInCar) {
+      w.push(...checkAvailabilityWarnings(
+        availIntervalsForDate,
+        { startISO: baseStartISO, endMs: baseEndMs, instructorId, carId, location: locationVal },
+        refData
+      ));
+    } else if (baseStartISO && baseEndMs && instructorId) {
+      // W3 can fire even for non-In Car courses (location mismatch still relevant)
+      w.push(...checkAvailabilityWarnings(
+        availIntervalsForDate,
+        { startISO: baseStartISO, endMs: baseEndMs, instructorId, carId: null, location: locationVal },
+        refData
+      ));
+    }
+    // W4 — cross-location travel buffer
+    const w4 = checkLocationTravelWarning(
+      allAppts,
+      { startISO: baseStartISO, endMs: baseEndMs, instructorId, location: locationVal, skipId: record?.id ?? null },
       refData
     );
-  }, [availIntervalsForDate, baseStartISO, baseEndMs, instructorId, carId, isInCar, refData]);
+    if (w4) w.push(w4);
+    return w;
+  }, [availIntervalsForDate, baseStartISO, baseEndMs, instructorId, carId, locationVal, isInCar, allAppts, record?.id, refData]);
 
   const warningByField = useMemo(() => {
     const map = {};
@@ -438,8 +474,16 @@ export default function AppointmentForm({ record, prefill, refData, onClose, sta
     if (vehicleId) setBaseValue("Cars", vehicleId);
   }, [instructorId, baseStartISO, baseEndMs, availIntervalsForDate, isInCar]);
 
+  // Auto-populate Location from instructor's availability window when Location is empty
+  useEffect(() => {
+    if (!locOptions.length || !instructorId || !baseStartISO || !baseEndMs || locationVal) return;
+    const loc = getAvailabilityLocation(availIntervalsForDate, baseStartISO, baseEndMs, instructorId);
+    if (loc) setBaseValue("Location", loc);
+  }, [instructorId, baseStartISO, baseEndMs, availIntervalsForDate, locOptions, locationVal]);
+
   // Bulk draft conflict tracking
   const [draftConflicts, setDraftConflicts] = useState({});  // index → conflict[]
+  const [draftWarnings, setDraftWarnings] = useState({});    // index → warning[]
 
   // Draft override forms (one per extra slot in bulk mode)
   // We use a simple approach: store just the overridden field values per draft index
@@ -469,6 +513,98 @@ export default function AppointmentForm({ record, prefill, refData, onClose, sta
     return { ...shifted, ...override };
   }
 
+  // ── Live conflict + warning detection for the active bulk draft ───────────
+  // We need fully reactive base values (from watchBase) so changes to the base form
+  // immediately propagate to the active draft's conflict/warning computation.
+  const baseFormSnapshot = baseForm.watch(); // subscribes to all base field changes
+
+  const activeDraftValues = useMemo(() => {
+    if (!bulkMode) return null;
+    const override = draftOverrides[activeDraft] ?? {};
+    const shifted = {
+      ...baseFormSnapshot,
+      startDate: shiftDateByWeeks(baseFormSnapshot.startDate, activeDraft),
+      classNumber: baseFormSnapshot.classNumber ? Number(baseFormSnapshot.classNumber) + activeDraft : activeDraft + 1,
+    };
+    return { ...shifted, ...override };
+  }, [bulkMode, activeDraft, draftOverrides, baseFormSnapshot]);
+
+  const activeDraftStartISO = useMemo(() => {
+    if (!activeDraftValues?.startDate || !activeDraftValues?.startTime) return null;
+    return new Date(activeDraftValues.startDate + "T" + activeDraftValues.startTime).toISOString();
+  }, [activeDraftValues?.startDate, activeDraftValues?.startTime]);
+
+  const activeDraftEndMs = useMemo(() => {
+    if (!activeDraftStartISO) return null;
+    const pudoMinutes = activeDraftValues.pudo === "0:30" ? 30 : activeDraftValues.pudo === "1:00" ? 60 : 0;
+    return new Date(activeDraftStartISO).getTime() + ((courseLengthSec ?? 0) + pudoMinutes * 2 * 60) * 1000;
+  }, [activeDraftStartISO, courseLengthSec, activeDraftValues?.pudo]);
+
+  const activeDraftAvailIntervals = useMemo(() => {
+    if (!bulkMode || !activeDraftValues?.startDate) return [];
+    try {
+      return expandAvailability(availRecords, new Date(activeDraftValues.startDate + "T00:00:00"));
+    } catch { return []; }
+  }, [bulkMode, activeDraftValues?.startDate, availRecords]);
+
+  const activeDraftConflicts = useMemo(() => {
+    if (!bulkMode || !activeDraftStartISO) return [];
+    return detectConflicts(
+      allAppts,
+      { startISO: activeDraftStartISO, studentId: activeDraftValues.Student, instructorId: activeDraftValues.Instructor, carId: activeDraftValues.Cars },
+      { isInCar, courseLengthSec, pudoOption: activeDraftValues.pudo },
+      null,
+      refData
+    );
+  }, [bulkMode, allAppts, activeDraftStartISO, activeDraftValues?.Student, activeDraftValues?.Instructor, activeDraftValues?.Cars, isInCar, courseLengthSec, activeDraftValues?.pudo, refData]);
+
+  const activeDraftWarnings = useMemo(() => {
+    if (!bulkMode || !activeDraftStartISO || !activeDraftEndMs || !isInCar) return [];
+    return checkAvailabilityWarnings(
+      activeDraftAvailIntervals,
+      { startISO: activeDraftStartISO, endMs: activeDraftEndMs, instructorId: activeDraftValues.Instructor, carId: activeDraftValues.Cars },
+      refData
+    );
+  }, [bulkMode, activeDraftAvailIntervals, activeDraftStartISO, activeDraftEndMs, activeDraftValues?.Instructor, activeDraftValues?.Cars, isInCar, refData]);
+
+  // Keep draftConflicts + draftWarnings in sync with live values for the active draft
+  useEffect(() => {
+    if (!bulkMode) return;
+    setDraftConflicts((prev) => {
+      if (activeDraftConflicts.length === 0) {
+        const next = { ...prev };
+        delete next[activeDraft];
+        return next;
+      }
+      return { ...prev, [activeDraft]: activeDraftConflicts };
+    });
+    setDraftWarnings((prev) => {
+      if (activeDraftWarnings.length === 0) {
+        const next = { ...prev };
+        delete next[activeDraft];
+        return next;
+      }
+      return { ...prev, [activeDraft]: activeDraftWarnings };
+    });
+  }, [bulkMode, activeDraft, activeDraftConflicts, activeDraftWarnings]);
+
+  // Build field-level maps for the active draft (used by BulkDraftPanel for highlights)
+  const activeDraftConflictByField = useMemo(() => {
+    const map = {};
+    for (const c of activeDraftConflicts) {
+      for (const f of c.fields) { if (!map[f]) map[f] = c; }
+    }
+    return map;
+  }, [activeDraftConflicts]);
+
+  const activeDraftWarningByField = useMemo(() => {
+    const map = {};
+    for (const w of activeDraftWarnings) {
+      for (const f of w.fields) { if (!map[f]) map[f] = w; }
+    }
+    return map;
+  }, [activeDraftWarnings]);
+
   // ── Single submit ─────────────────────────────────────────────────────────
   async function onSingleSubmit(data) {
     setSubmitAttempted(true);
@@ -495,35 +631,49 @@ export default function AppointmentForm({ record, prefill, refData, onClose, sta
   // ── Bulk submit ───────────────────────────────────────────────────────────
   async function onBulkSubmit() {
     setSubmitAttempted(true);
-    // Check all drafts for conflicts before submitting
-    const draftCheckResults = Array.from({ length: bulkCount }, (_, i) => {
+    // Check all drafts for conflicts + warnings before submitting
+    const allDraftResults = Array.from({ length: bulkCount }, (_, i) => {
       const vals = getMergedDraftValues(i);
       const draftStartISO = vals.startDate && vals.startTime
         ? new Date(vals.startDate + "T" + vals.startTime).toISOString()
         : null;
-      return detectConflicts(
+      const draftEndMs = draftStartISO
+        ? (() => {
+            const pudoMinutes = vals.pudo === "0:30" ? 30 : vals.pudo === "1:00" ? 60 : 0;
+            return new Date(draftStartISO).getTime() + ((courseLengthSec ?? 0) + pudoMinutes * 2 * 60) * 1000;
+          })()
+        : null;
+      const conflicts = detectConflicts(
         allAppts,
         { startISO: draftStartISO, studentId: vals.Student, instructorId: vals.Instructor, carId: vals.Cars },
         { isInCar, courseLengthSec, pudoOption: vals.pudo },
         null,
         refData
       );
+      const availForDate = draftStartISO && isInCar
+        ? (() => { try { return expandAvailability(availRecords, new Date(vals.startDate + "T00:00:00")); } catch { return []; } })()
+        : [];
+      const warnings = draftStartISO && draftEndMs && isInCar
+        ? checkAvailabilityWarnings(availForDate, { startISO: draftStartISO, endMs: draftEndMs, instructorId: vals.Instructor, carId: vals.Cars }, refData)
+        : [];
+      return { conflicts, warnings };
     });
 
-    const conflictedDrafts = draftCheckResults
-      .map((c, i) => ({ i, c }))
-      .filter(({ c }) => c.length > 0);
+    const newDraftConflicts = {};
+    const newDraftWarnings = {};
+    allDraftResults.forEach(({ conflicts, warnings }, i) => {
+      if (conflicts.length) newDraftConflicts[i] = conflicts;
+      if (warnings.length)  newDraftWarnings[i]  = warnings;
+    });
+    setDraftConflicts(newDraftConflicts);
+    setDraftWarnings(newDraftWarnings);
 
+    const conflictedDrafts = Object.keys(newDraftConflicts).map(Number);
     if (conflictedDrafts.length > 0) {
-      const newDraftConflicts = {};
-      conflictedDrafts.forEach(({ i, c }) => { newDraftConflicts[i] = c; });
-      setDraftConflicts(newDraftConflicts);
       toast.error("Draft" + (conflictedDrafts.length > 1 ? "s" : "") + " " +
-        conflictedDrafts.map(({ i }) => i + 1).join(", ") + " have conflicts — review before submitting");
+        conflictedDrafts.map((i) => i + 1).join(", ") + " have conflicts — review before submitting");
       return;
     }
-
-    setDraftConflicts({});
     setSubmitting(true);
     try {
       const drafts = Array.from({ length: bulkCount }, (_, i) => getMergedDraftValues(i));
@@ -583,6 +733,7 @@ export default function AppointmentForm({ record, prefill, refData, onClose, sta
             const vals = getMergedDraftValues(i);
             const hasOverride = !!draftOverrides[i] && Object.keys(draftOverrides[i]).length > 0;
             const hasDraftConflict = !!(draftConflicts[i]?.length);
+            const hasDraftWarning  = !hasDraftConflict && !!(draftWarnings[i]?.length);
             return (
               <button
                 key={i}
@@ -594,13 +745,16 @@ export default function AppointmentForm({ record, prefill, refData, onClose, sta
                     ? "bg-primary text-primary-foreground border-primary"
                     : hasDraftConflict
                     ? "bg-destructive/10 border-destructive text-destructive hover:bg-destructive/20"
+                    : hasDraftWarning
+                    ? "bg-amber-50 border-amber-400 text-amber-800 hover:bg-amber-100"
                     : hasOverride
-                    ? "bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100"
+                    ? "bg-blue-50 border-blue-300 text-blue-800 hover:bg-blue-100"
                     : "bg-background border-border text-muted-foreground hover:bg-muted")
                 }
               >
                 {i + 1}
                 {hasDraftConflict && <span className="ml-0.5">!</span>}
+                {hasDraftWarning  && <span className="ml-0.5">~</span>}
                 {vals.startDate && <span className="ml-1 opacity-70">{vals.startDate.slice(5)}</span>}
               </button>
             );
@@ -628,7 +782,7 @@ export default function AppointmentForm({ record, prefill, refData, onClose, sta
               )}
             </div>
           )}
-          <AppointmentFields form={baseForm} refData={refData} courseFlags={courseFlags} courseLengthSec={courseLengthSec} conflictByField={conflictByFieldWithCar} warningByField={warningByField} />
+          <AppointmentFields form={baseForm} refData={refData} courseFlags={courseFlags} courseLengthSec={courseLengthSec} conflictByField={conflictByFieldWithCar} warningByField={warningByField} isEdit={isEdit} />
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="outline" onClick={onClose} disabled={isBusy}>Cancel</Button>
             {!isEdit && (
@@ -643,22 +797,42 @@ export default function AppointmentForm({ record, prefill, refData, onClose, sta
         </form>
       ) : (
         // Bulk mode — show active draft as a controlled mini-form
-        <BulkDraftPanel
-          key={activeDraft}
-          draftIndex={activeDraft}
-          values={getMergedDraftValues(activeDraft)}
-          overrides={draftOverrides[activeDraft] ?? {}}
-          refData={refData}
-          courseFlags={courseFlags}
-          courseLengthSec={courseLengthSec}
-          onFieldChange={(field, value) => {
-            if (activeDraft === 0) {
-              setBaseValue(field, value);
-            } else {
-              setDraftField(activeDraft, field, value);
-            }
-          }}
-        />
+        <div className="space-y-3">
+          {activeDraftConflicts.length > 0 && (
+            <div className="rounded-md bg-destructive/10 border border-destructive/30 px-3 py-2 space-y-1">
+              {activeDraftConflicts.map((c) => (
+                <p key={c.type} className="text-xs text-destructive font-medium">{c.message}</p>
+              ))}
+            </div>
+          )}
+          {activeDraftWarnings.length > 0 && (
+            <div className="rounded-md bg-amber-50 border border-amber-300 px-3 py-2 space-y-1">
+              {activeDraftWarnings.map((w) =>
+                w.message.split("\n").map((line, i) => (
+                  <p key={w.type + i} className="text-xs text-amber-700 font-medium">{line}</p>
+                ))
+              )}
+            </div>
+          )}
+          <BulkDraftPanel
+            key={activeDraft}
+            draftIndex={activeDraft}
+            values={getMergedDraftValues(activeDraft)}
+            overrides={draftOverrides[activeDraft] ?? {}}
+            refData={refData}
+            courseFlags={courseFlags}
+            courseLengthSec={courseLengthSec}
+            conflictByField={activeDraftConflictByField}
+            warningByField={activeDraftWarningByField}
+            onFieldChange={(field, value) => {
+              if (activeDraft === 0) {
+                setBaseValue(field, value);
+              } else {
+                setDraftField(activeDraft, field, value);
+              }
+            }}
+          />
+        </div>
       )}
 
       {/* ── Bulk submit ── */}
@@ -677,7 +851,7 @@ export default function AppointmentForm({ record, prefill, refData, onClose, sta
 // ─── BulkDraftPanel ───────────────────────────────────────────────────────────
 // Renders a draft's fields as controlled inputs (no react-hook-form for simplicity).
 
-function BulkDraftPanel({ draftIndex, values, refData, courseFlags, courseLengthSec, onFieldChange }) {
+function BulkDraftPanel({ draftIndex, values, refData, courseFlags, courseLengthSec, conflictByField = {}, warningByField = {}, onFieldChange }) {
   const { isInCar, isClassroom, tierOptions, locOptions, spanishOffered, pudoOffered } = courseFlags;
   const v = values;
 
@@ -687,6 +861,12 @@ function BulkDraftPanel({ draftIndex, values, refData, courseFlags, courseLength
   function field(name) { return { value: v[name] ?? "", onChange: (e) => onFieldChange(name, e.target.value) }; }
   function linked(name) { return { value: v[name] ?? "", onChange: (val) => onFieldChange(name, val) }; }
   function checked(name) { return { checked: !!(v[name]), onChange: (e) => onFieldChange(name, e.target.checked) }; }
+
+  function conflictClass(fieldName) {
+    if (conflictByField[fieldName]) return " ring-2 ring-destructive ring-offset-0";
+    if (warningByField[fieldName])  return " ring-2 ring-amber-400 ring-offset-0";
+    return "";
+  }
 
   return (
     <div className="space-y-2">
@@ -698,7 +878,9 @@ function BulkDraftPanel({ draftIndex, values, refData, courseFlags, courseLength
 
         <div className="space-y-1">
           <Label>Student</Label>
-          <LinkedSelect {...linked("Student")} options={refData.studentOptions} placeholder="Select student..." />
+          <div className={"rounded-md" + conflictClass("Student")}>
+            <LinkedSelect {...linked("Student")} options={refData.studentOptions} placeholder="Select student..." />
+          </div>
         </div>
 
         <div className="space-y-1">
@@ -708,17 +890,22 @@ function BulkDraftPanel({ draftIndex, values, refData, courseFlags, courseLength
 
         <div className="space-y-1">
           <Label>Instructor</Label>
-          <LinkedSelect {...linked("Instructor")} options={refData.instructorOptions} placeholder="Select instructor..." />
+          <div className={"rounded-md" + conflictClass("Instructor")}>
+            <LinkedSelect {...linked("Instructor")} options={refData.instructorOptions} placeholder="Select instructor..." />
+          </div>
+          {warningByField["Instructor"] && (
+            <p className="text-xs text-amber-600">{warningByField["Instructor"].message}</p>
+          )}
         </div>
 
         <div className="space-y-1">
           <Label>Date</Label>
-          <Input type="date" {...field("startDate")} />
+          <Input type="date" className={"w-full" + conflictClass("startDate")} {...field("startDate")} />
         </div>
 
         <div className="space-y-1">
           <Label>Start Time</Label>
-          <Input type="time" {...field("startTime")} />
+          <Input type="time" className={"w-full" + conflictClass("startTime")} {...field("startTime")} />
         </div>
 
         <div className="space-y-1">
@@ -731,7 +918,9 @@ function BulkDraftPanel({ draftIndex, values, refData, courseFlags, courseLength
         {isInCar && (
           <div className="space-y-1">
             <Label>Car</Label>
-            <LinkedSelect {...linked("Cars")} options={refData.vehicleOptions} placeholder="Select car..." />
+            <div className={"rounded-md" + conflictClass("Cars")}>
+              <LinkedSelect {...linked("Cars")} options={refData.vehicleOptions} placeholder="Select car..." />
+            </div>
           </div>
         )}
 

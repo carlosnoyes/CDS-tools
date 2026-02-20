@@ -229,7 +229,7 @@ The calendar visually indicates when each instructor (and their paired car) is a
 **Algorithm:**
 1. For each availability record with `Status = "Scheduled"`:
    - Check if any occurrence of the record's cadence falls on the target date (match by day-of-week, within the recurrence window)
-   - If yes, add `{ instructorId, vehicleId, shiftStart, shiftEnd }` to the available slots for that day
+   - If yes, add `{ instructorId, vehicleId, location, shiftStart, shiftEnd }` to the available slots for that day
 2. For each availability record with `Status = "Blocked Off"`:
    - Same recurrence check
    - If yes, subtract that time range from all matching `Scheduled` slots for the same instructor + vehicle on that day
@@ -238,7 +238,7 @@ The calendar visually indicates when each instructor (and their paired car) is a
 **Lane interaction:**
 - Availability intervals that have a car linked clip to that car's lane. Availability intervals with no car clip to the instructor's sub-lane within the shared "No Car" lane at the right.
 
-**Car pairing:** Each availability record links both an instructor and a vehicle. When a car is linked, the availability overlay also reflects which car is assigned during that window. This is surfaced in the tooltip on hover: `"Instructor Name — Car Name — 9:00 AM – 5:00 PM"`. No additional visual distinction is added for the car pairing beyond the tooltip.
+**Location pairing:** Each availability record may carry a `Location` field (`CH` or `GA`). The location is shown as a third line of inline text in the availability strip (below the car name, when the strip is tall enough) and as a line in the hover tooltip. When a user clicks an availability strip to create a new appointment, the `Location` is pre-filled into the form alongside Instructor and Car.
 
 ##### Appointment Blocks
 
@@ -249,6 +249,7 @@ The calendar visually indicates when each instructor (and their paired car) is a
   - **Start Time** — the clicked hour, snapped to the nearest whole hour
   - **Instructor** — if an availability interval covers the clicked time in that column, the interval's instructor is pre-filled
   - **Car** — if the covering availability interval has a linked vehicle, it is pre-filled (even though the Car field is hidden until a Course is selected — it is stored in form state and surfaces automatically when an In Car course is chosen)
+  - **Location** — if the covering availability interval has a Location (`CH` or `GA`), it is pre-filled into the form (surfaces when a course with Location options is selected)
   - If multiple availability intervals overlap the clicked time (e.g. no-car sub-lanes), the first covering interval is used
 - Appointments dynamically reflow when the zoom changes
 
@@ -481,6 +482,44 @@ This section will grow as new error types are identified. All validation runs cl
 
 ---
 
+#### W3 — Instructor Not Scheduled at This Location *(warning)*
+
+**Trigger:** The instructor's covering availability window is for a different location than the one selected for the appointment (e.g. instructor is scheduled at `CH` but the appointment says `GA`).
+
+**Severity:** Warning only — does not block submission.
+
+**Fields highlighted (orange):** Location, Instructor
+
+**Message:** `"[Instructor Name] is scheduled at [Their Location] at this time, not [Selected Location]."`
+
+**Behavior:**
+- Only fires when the appointment has a Location field (course has `Locations Options` non-empty)
+- Only fires when a covering availability window exists **and** its Location is set **and** it differs from the selected appointment Location
+- If the covering window has no location set, no W3 is raised (no data = no warning)
+- Does not block submit — the scheduler may intentionally override
+
+---
+
+#### W4 — Instructor Traveling Between Locations Too Quickly *(warning)*
+
+**Trigger:** The instructor has another appointment on the same day at a **different** location that is scheduled within a 30-minute buffer of the proposed appointment (either ending less than 30 minutes before the new one starts, or starting less than 30 minutes after the new one ends).
+
+**Severity:** Warning only — does not block submission.
+
+**Fields highlighted (orange):** Instructor, Date, Start Time
+
+**Message:** `"[Instructor Name] has an appointment at [Other Location] ending at [Time] — less than 30 min travel buffer."`
+or
+`"[Instructor Name] has an appointment at [Other Location] starting at [Time] — less than 30 min travel buffer."`
+
+**Behavior:**
+- Only fires when both appointments have a Location field set and the locations differ
+- Travel buffer is exactly 30 minutes (`TRAVEL_BUFFER_MS = 30 * 60 * 1000`)
+- Does not block submit — the scheduler may intentionally accept the tight window
+- Canceled and No Show appointments are excluded (same as E1–E3)
+
+---
+
 #### Auto-population — Car from Instructor Availability
 
 When Instructor, Date, and Start Time are all set for an In Car course:
@@ -657,13 +696,14 @@ All field IDs are centralized in [app/src/utils/constants.js](../app/src/utils/c
 
 ### Availability Table (`tbl5db09IrQR5rmgU`) — Fields by Name
 
-| Field Name | Type | Notes |
-|-----------|------|-------|
-| Instructor | multipleRecordLinks | Linked instructor |
-| Vehicle | multipleRecordLinks | Linked car (may be absent for office/classroom shifts) |
-| Status | singleSelect | `"Scheduled"` or `"Blocked Off"` |
-| Start | dateTime | First occurrence; recurrence anchor |
-| Shift Length | number | Duration in seconds |
-| End | dateTime formula | Read-only |
-| Cadence | singleSelect | `"Weekly"` or `"Bi-Weekly"` |
-| Repeate Until | date | End of recurrence window (typo baked into Airtable) |
+| Field Name | Field ID | Type | Notes |
+|-----------|---------|------|-------|
+| Instructor | `fldUao9vyLTkkqAsh` | multipleRecordLinks | Linked instructor |
+| Vehicle | `fld6xoS3XDdBdX3Qd` | multipleRecordLinks | Linked car (may be absent for office/classroom shifts) |
+| Location | `fld3hPPZq6RjQfEHo` | singleSelect | `"CH"` (Colonial Heights) or `"GA"` (Glen Allen) |
+| Status | `fldQTPMjnjTLbAgN6` | singleSelect | `"Scheduled"` or `"Blocked Off"` |
+| Start | `fldsvwUb7vY8JVwQr` | dateTime | First occurrence; recurrence anchor |
+| Shift Length | `flddlnzPypEaaDQnW` | duration (seconds) | Duration of the shift |
+| End | `fld9AfRH5dykYArQv` | dateTime formula | Read-only |
+| Cadence | `flddEcAhjU8RvIFlJ` | singleSelect | `"Weekly"`, `"Bi-Weekly"`, or `"Daily"` |
+| Repeate Until | `fldqclSXT33dNYKLq` | date | End of recurrence window (typo baked into Airtable) |

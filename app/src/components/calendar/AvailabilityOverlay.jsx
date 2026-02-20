@@ -41,6 +41,7 @@ export default function AvailabilityOverlay({ intervals, pxPerHour, refData, dat
           iv.vehicleId
             ? (refData?.vehicleMap?.[iv.vehicleId]?.["Car Name"] ?? "Unknown Car")
             : null;
+        const locationLabel = iv.location ?? null;
 
         const startLabel = new Date(iv.startMs).toLocaleTimeString("en-US", {
           hour: "numeric", minute: "2-digit",
@@ -49,10 +50,12 @@ export default function AvailabilityOverlay({ intervals, pxPerHour, refData, dat
           hour: "numeric", minute: "2-digit",
         });
 
-        // Tooltip: three lines — instructor, car, time range
-        const tooltip = vehicleName
-          ? `${instructorName}\n${vehicleName}\n${startLabel} – ${endLabel}`
-          : `${instructorName}\n${startLabel} – ${endLabel}`;
+        // Tooltip: instructor, car (if any), location (if any), time range
+        const tooltipParts = [instructorName];
+        if (vehicleName) tooltipParts.push(vehicleName);
+        if (locationLabel) tooltipParts.push(locationLabel);
+        tooltipParts.push(`${startLabel} – ${endLabel}`);
+        const tooltip = tooltipParts.join("\n");
 
         // Only show inline label text when the strip is tall enough
         const showLabel = heightPx >= 28;
@@ -70,6 +73,7 @@ export default function AvailabilityOverlay({ intervals, pxPerHour, refData, dat
             time: clickedDate,
             instructorId: iv.instructorId,
             carId: iv.vehicleId ?? null,
+            locationId: iv.location ?? null,
           });
         }
 
@@ -103,6 +107,14 @@ export default function AvailabilityOverlay({ intervals, pxPerHour, refData, dat
                     style={{ color: color + "99" }}
                   >
                     {vehicleName}
+                  </div>
+                )}
+                {locationLabel && heightPx >= 56 && (
+                  <div
+                    className="text-[9px] truncate"
+                    style={{ color: color + "99" }}
+                  >
+                    {locationLabel}
                   </div>
                 )}
               </div>

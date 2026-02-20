@@ -232,7 +232,7 @@ All new tables were duplicated from **Template Table** and share the same 3 base
 
 > Table was formerly named "Appointments" in docs. Airtable table name is now "Schedule" (`tblo5X0nETYrtQ6bI`).
 
-**Last verified:** 2026-02-20 (live API)
+**Last verified:** 2026-02-20 (live API — 2 new fields added: Canceled, No Show)
 
 | Field | ID | Type | Notes |
 |-------|----|------|-------|
@@ -262,6 +262,8 @@ All new tables were duplicated from **Template Table** and share the same 3 base
 | End | `fldA4Cct6GbdTJf9v` | formula | `DATEADD({Start}, ({Length (from Course)}/60) + (2*{PUDO}/60), "minutes")` — read only |
 | Class Number | `fldw5sIWilBYqwQdl` | number | Sequential class number within student's enrollment |
 | Notes | `fldwDBhLucKlzEiMu` | singleLineText | Free-form notes |
+| Canceled | `fld4sG95vpTu5jnbk` | checkbox | Whether the appointment was canceled |
+| No Show | `fldhYZ5TjHhDI8WVy` | checkbox | Whether the student was a no-show |
 | Record ID | `fldlXk1OUtz0S8ghl` | formula | `RECORD_ID()` — read only |
 | Created | `fldanniRebdEOza0d` | formula | `CREATED_TIME()` — read only |
 | Last Modified | `fldCKn1xYAQ8BBnve` | formula | `LAST_MODIFIED_TIME()` — read only |
