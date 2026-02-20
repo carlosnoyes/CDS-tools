@@ -37,7 +37,7 @@ export default function AppointmentBlock({
         height: Math.max(height, 24),
         left: left ?? 0,
         width: width ?? "calc(100% - 4px)",
-        backgroundColor: color + "22",
+        backgroundColor: color + "dd",
         borderLeft: `3px solid ${color}`,
         cursor: "pointer",
         overflow: "hidden",
@@ -45,14 +45,14 @@ export default function AppointmentBlock({
       }}
       className="rounded-sm px-1.5 py-0.5 hover:brightness-95 transition-all"
     >
-      <div className="text-[11px] font-semibold leading-tight truncate" style={{ color }}>
+      <div className="text-[11px] font-semibold leading-tight truncate text-white">
         {instructorName}
       </div>
-      <div className="text-[10px] leading-tight truncate text-foreground/80">
+      <div className="text-[10px] leading-tight truncate text-white/90">
         {studentName}
       </div>
       {height >= 36 && (
-        <div className="text-[10px] leading-tight truncate text-muted-foreground">
+        <div className="text-[10px] leading-tight truncate text-white/75">
           {courseName}
         </div>
       )}

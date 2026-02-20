@@ -145,15 +145,19 @@ export function resolveByInstructor(appointments, seedLaneKeys = []) {
   return resolveByLane(appointments, (appt) => appt.fields.Instructor?.[0] ?? null, seedLaneKeys);
 }
 
-// By Car: car lanes + an unassigned lane subdivided by instructor.
-// seedCarKeys: car IDs from availability for seeding car lanes.
-// seedNoCarInstructorKeys: instructor IDs from availability with no car,
-//   for seeding the unassigned sub-lanes.
-export function resolveByCar(appointments, seedCarKeys = [], seedNoCarInstructorKeys = []) {
-  return resolveByLane(
-    appointments,
-    (appt) => appt.fields.Car?.[0] ?? null,
-    seedCarKeys,
-    seedNoCarInstructorKeys
-  );
+// By Car + Classroom: car lanes (keyed by record ID) + classroom lanes (keyed by
+// classroom name string e.g. "Class Room 1") + an unassigned lane subdivided by instructor.
+// seedCarKeys: car record IDs sorted in desired lane order (Car 1 → Car N).
+// seedClassroomKeys: classroom name strings sorted in desired lane order.
+// seedNoCarInstructorKeys: instructor IDs for seeding the unassigned sub-lanes.
+export function resolveByCar(
+  appointments,
+  seedCarKeys = [],
+  seedNoCarInstructorKeys = [],
+  seedClassroomKeys = []
+) {
+  // Lane key: car record ID, classroom name, or null (→ unassigned)
+  const getLaneKey = (appt) => appt.fields.Car?.[0] ?? appt.fields.Classroom ?? null;
+  const seedLaneKeys = [...seedCarKeys, ...seedClassroomKeys];
+  return resolveByLane(appointments, getLaneKey, seedLaneKeys, seedNoCarInstructorKeys);
 }

@@ -10,7 +10,7 @@ CDS needs a web UI to view and manage driving appointments stored in Airtable. T
 
 - [x] Table view of all appointments (sortable, filterable, user-defined date range)
 - [x] Add / Edit appointment form (dynamic fields based on Course, Class # auto-calc, bulk scheduling, conflict detection)
-- [x] Calendar year-scroll view (all weeks stacked, By Car / By Instructor grouping, axis zoom, instructor availability overlay)
+- [x] Calendar year-scroll view (all weeks stacked, By Car lane layout, axis zoom, instructor availability overlay)
 - [x] Conflict detection: student / instructor / car double-booking with inline errors
 
 ## Non-Goals
@@ -91,11 +91,10 @@ CDS needs a web UI to view and manage driving appointments stored in Airtable. T
 - [x] Both zoom values stored in component state, persist while on calendar page
 - [x] Calendar height and block positions recompute reactively from zoom state
 
-#### 7c — Grouping Modes *(Tight removed in Phase 11)*
+#### 7c — Lane Layout *(By Car only — By Instructor removed)*
 - [x] By Car: lane-per-car layout; "No Car" lane at right for unassigned
-- [x] By Instructor: lane-per-instructor layout; "No Instructor" lane at right
 - [x] Within-lane time overlaps handled by sub-cluster algorithm
-- [x] Appointment block color remains instructor-based regardless of grouping
+- [x] Appointment block color is instructor-based
 - [x] Click-to-create snaps to 60-min increments
 
 ### Phase 8 — Appointment Form Redesign
@@ -105,6 +104,9 @@ CDS needs a web UI to view and manage driving appointments stored in Airtable. T
 - [x] Split existing `datetime-local` into separate Date picker + Time picker
 - [x] Display computed End Time as read-only (derived from Start + Course.Length + 2×PUDO)
 - [x] Remove `Vehicle` field (replaced by conditional Car / Classroom fields below)
+- [x] Default Date to today in create mode
+- [x] Default Start Time to 8:00 AM in create mode
+- [x] Course dropdown label uses the Lookup field from Courses table (not raw name field)
 
 #### 8b — Conditional Fields (Course-Driven)
 - [x] On Course select: fetch that course's lookup fields (`Type`, `Age Options`, `Tier Options`, `Locations Options`, `Spanish Offered`, `PUDO Offered`)
@@ -123,6 +125,7 @@ CDS needs a web UI to view and manage driving appointments stored in Airtable. T
 - [x] Show auto-calculated value in form; allow manual override
 
 #### 8d — Bulk Scheduling
+- [x] Button order in form footer: Cancel — Bulk Schedule — Create Appointment (Bulk Schedule between Cancel and primary action)
 - [x] Replace single submit button with **"Schedule One"** / **"Bulk Schedule"** choice
 - [x] Bulk: show number input for quantity → generate N drafts offset by +1 week each
 - [x] Tabbed / paginated draft navigator ("1 of 5", "2 of 5", etc.)
@@ -141,6 +144,17 @@ CDS needs a web UI to view and manage driving appointments stored in Airtable. T
 - [x] Final gate validation on submit (catches anything missed by eager checks)
 - [x] Use 2-min appointments cache for conflict checks; no extra API call if cache is warm
 
+### Phase 9b — Availability Warnings & Car Auto-Population
+
+- [x] Car field is required for In Car courses (E4 blocks submit if empty)
+- [x] W1 — Instructor not available at proposed time: glow Instructor + Date + Start **orange**; warning message; does not block submit
+- [x] W2 — Car not in instructor's availability window: glow Car **orange**; warning message; does not block submit
+- [x] Auto-populate Car from instructor's availability window when Car is empty and Instructor + Date + Start are all set
+- [x] Wire `useAvailability` into `AppointmentForm`; pass availability records down for eager warning checks
+- [x] Add `checkAvailabilityWarnings()` to `conflicts.js` using `expandAvailability()` util
+- [x] Orange ring style for warning fields (distinct from red error ring)
+- [x] Warning messages rendered below fields (same location as error messages but amber/orange color)
+
 ### Phase 10 — Instructor Availability Overlay
 
 - [x] Add `useAvailability(startDate, endDate)` hook — fetch Availability table records, cache 2 min
@@ -149,14 +163,13 @@ CDS needs a web UI to view and manage driving appointments stored in Airtable. T
 - [x] Write `expandAvailability(records, targetDate)` utility — expands `Scheduled` recurrences (Weekly / Bi-Weekly) to the target date, subtracts `Blocked Off` intervals, returns `[{ instructorId, vehicleId, start, end }]`
 - [x] Add `AvailabilityOverlay` component — renders translucent instructor-colored background strips in `DayColumn` for each available interval
 - [x] Integrate overlay into `DayColumn`: pass availability intervals as prop; render behind appointment blocks (low z-index)
-- [x] In **By Instructor** mode: show each instructor's overlay only in their own lane (clip to lane width/offset)
-- [x] In **By Car** mode: availability strips clip to each car's lane; no-car availability strips clip to the unassigned sub-lane for their instructor
+- [x] Availability strips clip to each car's lane; no-car availability strips clip to the unassigned sub-lane for their instructor
 - [x] Tooltip on hover: `"Instructor Name — Car Name — 9:00 AM – 5:00 PM"` (using `title` attribute or tooltip component)
 - [x] Pass availability data down through `CalendarGrid` → `DayColumn`
 
 ### Phase 11 — Calendar UX Overhaul
 
-- [x] Remove Tight grouping — only "By Car" / "By Instructor"
+- [x] Remove Tight grouping and By Instructor — By Car only
 - [x] Remove Day / Week / Month / Year mode toggles — calendar always shows all weeks of the year (stacked)
 - [x] Scroll-based week tracking: `IntersectionObserver` updates the nav label as the user scrolls
 - [x] Nav arrow buttons and Today scroll to the target week (smooth) and lock the observer during transit
@@ -175,6 +188,69 @@ CDS needs a web UI to view and manage driving appointments stored in Airtable. T
 - [x] `resolveByLane` accepts `seedUnassignedKeys` for seeding the unassigned lane's sub-division
 - [x] `resolveByCar` accepts `seedNoCarInstructorKeys` and forwards them as `seedUnassignedKeys`
 - [x] Availability overlay geometry for no-car intervals correctly clips to each instructor's sub-lane within the No Car lane
+
+### Phase 13 — Drag-to-Resize Zoom + Day Popout + Date Picker
+
+#### 13a — Drag-to-Resize Axis Zoom
+- [x] Add drag handle on the right border of each day column header — dragging resizes all columns simultaneously (uniform width)
+- [x] Add drag handle on the right border of the time gutter — dragging resizes the gutter width independently
+- [x] Cursor changes to `col-resize` on hover over either handle
+- [x] Enforce min/max: column 60–1200 px, gutter 40–200 px
+- [x] Drag zoom coexists with existing double-click scroll-wheel zoom; both write to the same column/gutter width state
+
+#### 13b — Day Popout
+- [x] Double-click a day column header opens that day in a full-width modal/overlay (Day Popout)
+- [x] Popout renders the same time grid and appointment blocks as the main calendar, using full available width
+- [x] Popout has its own independent `PX_PER_HOUR` zoom state (does not affect main calendar zoom)
+- [x] Escape key or × button closes the popout; returns to calendar with main-view state unchanged
+- [x] Click-to-create and click-to-edit work inside the popout the same as in the main calendar
+
+#### 13c — Calendar Date Picker
+- [x] Clicking the week range label (or date chips) in the week selector opens an inline calendar picker
+- [x] Picker supports month/year navigation for fast forward/backward jumps
+- [x] Selecting a date closes the picker and scroll-jumps the calendar to the week containing that date (same behavior as Today button)
+- [x] Picker closes on Escape or clicking outside
+
+### Phase 14 — Lane Order + Availability Strip Labels
+
+- [x] Fixed lane order: Car 1 → Car 2 → Car 3 → Car 4 → Car 5 → Class Room 1 → Class Room 2 → unassigned (no car/classroom)
+- [x] Classroom appointments occupy their own named lane (keyed by `Classroom` singleSelect value), not the unassigned lane
+- [x] Lane keys sorted numerically/alphabetically so new cars/classrooms slot in predictably
+- [x] Availability strips show inline text: `{Instructor Name}` on first line, `{Car Name / Classroom}` on second line (when strip is tall enough)
+- [x] Hover tooltip: `{Instructor Name}\n{Car Name / Classroom}\n{Start Time – End Time}`
+- [x] Empty lanes are omitted — a lane only appears if it has availability intervals or appointments on that day; all available column width is shared among active lanes only
+
+### Phase 15 — Appointment Form: Course-Gated Fields
+
+- [x] Hide Car and Classroom entirely until a Course is selected (no pre-emptive Car field shown)
+- [x] Once course selected: show Car if `Type = "In Car"`, show Classroom if `Type = "Classroom"`; never show both
+- [x] Class # field only shown when selected Course has `Numbered = true`
+- [x] Fetch `Numbered` field from Courses table in `courses.js`
+- [x] Car required error (E4) only shows after a submit attempt, not eagerly
+
+### Phase 16 — W2 Contextual Warning Message
+
+- [x] W2 message replaced with up to two lines: "{Instructor} is scheduled for {Their Car} at this time." and "{Selected Car} is scheduled for {Its Instructor} at this time."
+- [x] First line omitted if instructor has no covering window with a car linked
+- [x] Second line omitted if the selected car is not in any other instructor's window
+- [x] Falls back to original message if neither line is available
+
+### Phase 17 — Calendar Click: New Appointment with Availability Pre-fill
+
+- [x] Clicking empty time slot always opens New Appointment form (never Edit)
+- [x] Pre-fill Date and Start Time (snapped to nearest hour) from click position
+- [x] Pre-fill Instructor from any availability interval covering the clicked time in that column
+- [x] Pre-fill Car from that interval's linked vehicle (stored in form state even though Car field is hidden until a course is selected)
+- [x] Separate `prefill` prop from `record` prop in AppointmentModal/Form so isEdit is never true for calendar clicks
+- [x] DayColumn passes `{ time, instructorId, carId }` up through onCreateAt instead of just `time`
+
+### Phase 18 — Appointment Form as Calendar Sidebar
+
+- [x] On the Calendar view, appointment form opens as a right-side sidebar instead of a modal dialog
+- [x] Calendar remains fully visible and scrollable behind the open sidebar
+- [x] Sidebar has a fixed width (~420px) and a close (×) button in its header
+- [x] When the Date field changes in the sidebar, the calendar navigates to the week containing that date
+- [x] Table view continues to use the existing modal dialog (AppointmentModal unchanged)
 
 ## Constraints
 

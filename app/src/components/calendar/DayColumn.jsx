@@ -1,62 +1,53 @@
 import { HOUR_LABELS, DAY_START_HOUR } from "@/utils/time";
+import { CLASSROOMS } from "@/utils/constants";
 import { resolveByInstructor, resolveByCar } from "@/utils/overlap";
 import AppointmentBlock from "./AppointmentBlock";
 import AvailabilityOverlay from "./AvailabilityOverlay";
 
 /**
- * Derive lane seed keys from availability intervals.
- * For By Car: returns { carKeys, noCarInstructorKeys }
- * For By Instructor: returns { instructorKeys }
+ * Build the seed arrays for lane layout — only includes lanes that are active on this day.
+ * Cars: vehicle IDs present in availability intervals, sorted by Car Name.
+ * Classrooms: only classrooms that have at least one appointment today, in CLASSROOMS order.
+ * No-car instructor seeds: from availability intervals with no vehicle.
+ *
+ * A lane is omitted entirely if it has no availability and no appointments — empty lanes
+ * take no space so the available width is shared among active lanes only.
  */
-function availabilitySeeds(availabilityIntervals, grouping) {
-  if (grouping === "By Instructor") {
-    const keys = [...new Set(availabilityIntervals.map((iv) => iv.instructorId).filter(Boolean))];
-    return { instructorKeys: keys };
-  }
-  if (grouping === "By Car") {
-    const carKeys = [...new Set(
-      availabilityIntervals.filter((iv) => iv.vehicleId).map((iv) => iv.vehicleId)
-    )];
-    const noCarInstructorKeys = [...new Set(
-      availabilityIntervals.filter((iv) => !iv.vehicleId).map((iv) => iv.instructorId).filter(Boolean)
-    )];
-    return { carKeys, noCarInstructorKeys };
-  }
-  return {};
-}
+function buildSeeds(availabilityIntervals, appointments, refData) {
+  // Car seeds: vehicle IDs seen in availability today, sorted numerically by Car Name
+  const carIds = [...new Set(
+    availabilityIntervals.filter((iv) => iv.vehicleId).map((iv) => iv.vehicleId)
+  )];
+  const sortedCarKeys = carIds.slice().sort((a, b) => {
+    const nameA = refData.vehicleMap?.[a]?.["Car Name"] ?? a;
+    const nameB = refData.vehicleMap?.[b]?.["Car Name"] ?? b;
+    return nameA.localeCompare(nameB, undefined, { numeric: true });
+  });
 
-function resolveForGrouping(appointments, grouping, seeds) {
-  if (grouping === "By Instructor") {
-    return resolveByInstructor(appointments, seeds.instructorKeys ?? []);
-  }
-  // By Car (default fallback)
-  return resolveByCar(appointments, seeds.carKeys ?? [], seeds.noCarInstructorKeys ?? []);
+  // Classroom seeds: only classrooms actually used by appointments today, in stable order
+  const usedClassrooms = new Set(
+    appointments.map((a) => a.fields.Classroom).filter(Boolean)
+  );
+  const classroomKeys = CLASSROOMS.filter((c) => usedClassrooms.has(c));
+
+  // No-car instructor seeds for the unassigned sub-lane
+  const noCarInstructorKeys = [...new Set(
+    availabilityIntervals.filter((iv) => !iv.vehicleId).map((iv) => iv.instructorId).filter(Boolean)
+  )];
+
+  return { sortedCarKeys, classroomKeys, noCarInstructorKeys };
 }
 
 /**
- * Annotate each availability interval with laneLeft / laneWidth percentages
- * matching the resolved lane layout.
- *
- * For By Car mode:
- *   - Intervals with a vehicleId → clip to that car's lane
- *   - Intervals with no vehicleId → clip to the "__unassigned__" lane,
- *     then further sub-clip by instructorId within that lane
- *
- * For By Instructor mode:
- *   - Clip each interval to its instructor lane
+ * Annotate each availability interval with laneLeft / laneWidth percentages.
+ * Intervals with a car clip to that car's lane.
+ * Intervals with no car clip to the instructor's sub-lane within the __unassigned__ lane.
  */
-function annotateAvailabilityLanes(intervals, laneOrder, laneWidth, grouping, noCarSubLaneOrder, noCarSubLaneWidth) {
+function annotateAvailabilityLanes(intervals, laneOrder, laneWidth, noCarSubLaneOrder, noCarSubLaneWidth) {
   const numLanes = laneOrder.length;
   if (!numLanes) return intervals.map((iv) => ({ ...iv, laneLeft: "0%", laneWidth: "100%" }));
 
   return intervals.map((iv) => {
-    if (grouping === "By Instructor") {
-      const idx = laneOrder.indexOf(iv.instructorId);
-      if (idx === -1) return { ...iv, laneLeft: "0%", laneWidth: "100%" };
-      return { ...iv, laneLeft: `${idx * laneWidth}%`, laneWidth: `${laneWidth}%` };
-    }
-
-    // By Car
     if (iv.vehicleId) {
       const idx = laneOrder.indexOf(iv.vehicleId);
       if (idx === -1) return { ...iv, laneLeft: "0%", laneWidth: "100%" };
@@ -67,7 +58,7 @@ function annotateAvailabilityLanes(intervals, laneOrder, laneWidth, grouping, no
     const unassignedIdx = laneOrder.indexOf("__unassigned__");
     if (unassignedIdx === -1) return { ...iv, laneLeft: "0%", laneWidth: "100%" };
 
-    const unassignedLeft  = unassignedIdx * laneWidth;
+    const unassignedLeft = unassignedIdx * laneWidth;
 
     if (!noCarSubLaneOrder?.length) {
       return { ...iv, laneLeft: `${unassignedLeft}%`, laneWidth: `${laneWidth}%` };
@@ -86,42 +77,42 @@ function annotateAvailabilityLanes(intervals, laneOrder, laneWidth, grouping, no
 
 export default function DayColumn({
   appointments, refData, onEdit, onClickTime, date,
-  pxPerHour, grouping = "By Instructor", availabilityIntervals = [],
+  pxPerHour, availabilityIntervals = [],
 }) {
-  const seeds = availabilitySeeds(availabilityIntervals, grouping);
-  const { resolved, laneOrder, laneWidth } = resolveForGrouping(appointments, grouping, seeds);
+  const { sortedCarKeys, classroomKeys, noCarInstructorKeys } = buildSeeds(availabilityIntervals, appointments, refData);
 
-  // For By Car: also resolve the sub-lane layout of the unassigned lane so we
-  // can annotate availability intervals that have no car with the right geometry.
+  const { resolved, laneOrder, laneWidth } = resolveByCar(
+    appointments, sortedCarKeys, noCarInstructorKeys, classroomKeys
+  );
+
+  // Resolve sub-lane layout for the unassigned (no car, no classroom) lane
   let noCarSubLaneOrder = [];
   let noCarSubLaneWidth = 100;
-  if (grouping === "By Car") {
-    const noCarInstructorSeeds = seeds.noCarInstructorKeys ?? [];
-    // Collect instructor keys from unassigned appointments too
-    const unassignedAppts = appointments.filter((a) => !a.fields.Car?.[0]);
-    const unassignedInstructorKeys = [
-      ...new Set(unassignedAppts.map((a) => a.fields.Instructor?.[0]).filter(Boolean)),
-    ];
-    const allNoCarSeeds = [...new Set([...noCarInstructorSeeds, ...unassignedInstructorKeys])];
-    if (allNoCarSeeds.length) {
-      const subResult = resolveByInstructor([], allNoCarSeeds);
-      noCarSubLaneOrder = subResult.laneOrder;
-      noCarSubLaneWidth = subResult.laneWidth;
-    }
+  const unassignedAppts = appointments.filter((a) => !a.fields.Car?.[0] && !a.fields.Classroom);
+  const unassignedInstructorKeys = [
+    ...new Set(unassignedAppts.map((a) => a.fields.Instructor?.[0]).filter(Boolean)),
+  ];
+  const allNoCarSeeds = [...new Set([...noCarInstructorKeys, ...unassignedInstructorKeys])];
+  if (allNoCarSeeds.length) {
+    const subResult = resolveByInstructor([], allNoCarSeeds);
+    noCarSubLaneOrder = subResult.laneOrder;
+    noCarSubLaneWidth = subResult.laneWidth;
   }
 
   const displayIntervals = annotateAvailabilityLanes(
-    availabilityIntervals, laneOrder, laneWidth, grouping,
+    availabilityIntervals, laneOrder, laneWidth,
     noCarSubLaneOrder, noCarSubLaneWidth
   );
 
+  // Column-level click fires when clicking outside an availability strip or appointment.
+  // Strips stop propagation and fire onClickTime themselves with instructor/car pre-fill.
   function handleColumnClick(e) {
     const rect = e.currentTarget.getBoundingClientRect();
     const y = e.clientY - rect.top;
     const hour = Math.floor(y / pxPerHour) + DAY_START_HOUR;
     const clickedDate = new Date(date);
     clickedDate.setHours(hour, 0, 0, 0);
-    onClickTime(clickedDate);
+    onClickTime({ time: clickedDate, instructorId: null, carId: null });
   }
 
   const totalHeight = HOUR_LABELS.length * pxPerHour;
@@ -137,6 +128,8 @@ export default function DayColumn({
         intervals={displayIntervals}
         pxPerHour={pxPerHour}
         refData={refData}
+        date={date}
+        onClickTime={onClickTime}
       />
 
       {/* Hour grid lines */}

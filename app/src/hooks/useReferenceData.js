@@ -55,7 +55,7 @@ export function useReferenceData() {
   const instructorOptions = useMemo(() => toOptions(instructors.data, "Full Name"), [instructors.data]);
   const studentOptions    = useMemo(() => toOptions(students.data, "Full Name"),    [students.data]);
   const vehicleOptions    = useMemo(() => toOptions(vehicles.data, "Car Name"),     [vehicles.data]);
-  const courseOptions     = useMemo(() => toOptions(courses.data, "Abreviation"),   [courses.data]);
+  const courseOptions     = useMemo(() => toOptions(courses.data, "Lookup"),         [courses.data]);
 
   const isLoading =
     instructors.isLoading ||

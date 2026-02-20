@@ -46,7 +46,7 @@ export const APPT_FIELDS = {
   // Writable fields
   student:      "fldSGS6xsegcdEklh",  // multipleRecordLinks → Students
   instructor:   "fldtQT4tfTJ5FCm9T",  // multipleRecordLinks → Instructors
-  cars:         "fldPRZoDW0yAe2YwQ",  // multipleRecordLinks → Cars
+  car:          "fldPRZoDW0yAe2YwQ",  // multipleRecordLinks → Cars (field name is "Car" in Airtable)
   course:       "fldy84c9JSS2ris1w",  // multipleRecordLinks → Courses
   start:        "fldSEIbrQiwpMhwB4",  // dateTime (ISO string)
   classNumber:  "fldw5sIWilBYqwQdl",  // number
@@ -57,7 +57,7 @@ export const APPT_FIELDS = {
   tier:         "fldWMcjKhn1y7INxi",  // singleSelect: "EL", "RL"
   location:     "fldkQZ5XXOZTqXPlm",  // singleSelect: "CH", "GA"
   spanish:      "fld17lzRvlLbFdUa4",  // checkbox
-  pudo:         "fld6nShioyE8NGlKH",  // singleSelect: "0:30", "1:00"
+  pudo:         "fld6nShioyE8NGlKH",  // duration (seconds): null, 1800 (30 min), 3600 (60 min)
 };
 
 export const CLASSROOMS = ["Class Room 1", "Class Room 2"];

@@ -4,16 +4,14 @@ import { instructorColor } from "@/utils/colors";
 /**
  * Renders translucent instructor-colored strips behind appointment blocks.
  * Each interval in `intervals` is { instructorId, vehicleId, startMs, endMs }.
- *
- * In By Instructor grouping the parent clips each strip to its lane via
- * left/width props. In Tight and By Car modes all strips paint across the
- * full column width (painter's order, overlapping washes are intentional).
+ * Strips are clipped to their lane (laneLeft / laneWidth set by DayColumn).
+ * Shows inline text labels (instructor name + car name) and a tooltip with time range.
  *
  * @param {object[]} intervals   - availability intervals for this day
  * @param {number}   pxPerHour   - vertical zoom value
  * @param {object}   refData     - reference data (instructors, vehicles maps)
  */
-export default function AvailabilityOverlay({ intervals, pxPerHour, refData }) {
+export default function AvailabilityOverlay({ intervals, pxPerHour, refData, date, onClickTime }) {
   if (!intervals?.length) return null;
 
   return (
@@ -37,7 +35,6 @@ export default function AvailabilityOverlay({ intervals, pxPerHour, refData }) {
         const topPx = (clampedStart - DAY_START_HOUR) * pxPerHour;
         const heightPx = (clampedEnd - clampedStart) * pxPerHour;
 
-        // Build tooltip text (instructorMap / vehicleMap values are the fields objects directly)
         const instructorName =
           refData?.instructorMap?.[iv.instructorId]?.["Full Name"] ?? "Unknown";
         const vehicleName =
@@ -52,14 +49,34 @@ export default function AvailabilityOverlay({ intervals, pxPerHour, refData }) {
           hour: "numeric", minute: "2-digit",
         });
 
+        // Tooltip: three lines — instructor, car, time range
         const tooltip = vehicleName
-          ? `${instructorName} — ${vehicleName} — ${startLabel}–${endLabel}`
-          : `${instructorName} — ${startLabel}–${endLabel}`;
+          ? `${instructorName}\n${vehicleName}\n${startLabel} – ${endLabel}`
+          : `${instructorName}\n${startLabel} – ${endLabel}`;
+
+        // Only show inline label text when the strip is tall enough
+        const showLabel = heightPx >= 28;
+
+        function handleStripClick(e) {
+          e.stopPropagation(); // don't bubble to column's generic click handler
+          const rect = e.currentTarget.getBoundingClientRect();
+          const y = e.clientY - rect.top;
+          // Hour offset within this strip, then add the strip's own start hour
+          const hourOffset = Math.floor(y / pxPerHour);
+          const clickedHour = Math.floor(clampedStart) + hourOffset;
+          const clickedDate = new Date(date);
+          clickedDate.setHours(clickedHour, 0, 0, 0);
+          onClickTime({
+            time: clickedDate,
+            instructorId: iv.instructorId,
+            carId: iv.vehicleId ?? null,
+          });
+        }
 
         return (
           <div
             key={idx}
-            className="absolute pointer-events-auto"
+            className="absolute overflow-hidden cursor-pointer"
             style={{
               top: topPx,
               height: heightPx,
@@ -70,7 +87,27 @@ export default function AvailabilityOverlay({ intervals, pxPerHour, refData }) {
               width: iv.laneWidth ?? "100%",
             }}
             title={tooltip}
-          />
+            onClick={handleStripClick}
+          >
+            {showLabel && (
+              <div className="px-1 pt-0.5 leading-tight pointer-events-none select-none">
+                <div
+                  className="text-[10px] font-medium truncate"
+                  style={{ color: color + "cc" }}
+                >
+                  {instructorName}
+                </div>
+                {vehicleName && heightPx >= 42 && (
+                  <div
+                    className="text-[9px] truncate"
+                    style={{ color: color + "99" }}
+                  >
+                    {vehicleName}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         );
       })}
     </>

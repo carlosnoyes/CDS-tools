@@ -98,7 +98,7 @@ User Action (React UI)
 **Base:** Colonial Driving School - Carlos
 **Base ID:** `appfmh7j77kCe8hy2`
 **API Key env var:** `VITE_AIRTABLE_API_KEY` (in `app/.env`)
-**Last synced:** 2026-02-19 (live API — full field IDs verified, schema updated)
+**Last synced:** 2026-02-20 (live API — full field IDs verified, schema updated)
 
 ### Tables
 
@@ -132,14 +132,14 @@ All new tables were duplicated from **Template Table** and share the same 3 base
 
 ### Key Relationships
 
-**New table relationships (live as of 2026-02-19):**
+**New table relationships (live as of 2026-02-20):**
 
 | From | Field | To | Inverse Field |
 |------|-------|----|---------------|
 | Students | Appointments (`fldcMrrWus0qxba8i`) | Schedule | Student (`fldSGS6xsegcdEklh`) |
 | Instructors | Appointments (`fldiMi2l98HdCCHAW`) | Schedule | Instructor (`fldtQT4tfTJ5FCm9T`) |
 | Instructors | Availability (`fldRTIb0HtZyZuhsL`) | Availability | Instructor (`fldUao9vyLTkkqAsh`) |
-| Cars | Appointments (`fldeQixDezXKvJc9F`) | Schedule | Cars (`fldPRZoDW0yAe2YwQ`) |
+| Cars | Appointments (`fldeQixDezXKvJc9F`) | Schedule | Car (`fldPRZoDW0yAe2YwQ`) |
 | Cars | Availability (`fld8BXNxmFXw77aZZ`) | Availability | Vehicle (`fld6xoS3XDdBdX3Qd`) |
 | Courses | Appointments (`fldtOvjel2szfdL5o`) | Schedule | Course (`fldy84c9JSS2ris1w`) |
 | Courses | Prices (`fldzJJrWfRxAhTyec`) | Prices | Course Abreviation (`fldUbYGgKQqADUDSU`) |
@@ -166,8 +166,9 @@ All new tables were duplicated from **Template Table** and share the same 3 base
 | Guardian Relation | `fldbWdPSN5Nev2blX` | singleLineText | Relationship of guardian to student |
 | Guardian Phone | `fld6WORo9bVhoV0Js` | phoneNumber | |
 | Guardian Email | `fldVn5HpMzAIi1a13` | email | |
+| Teen | `fldMZsgc6M6tjSM4N` | checkbox | Whether the student is a teen |
 | Address | `fldf1aK38wvLlWi0o` | singleLineText | |
-| Appointments | `fldcMrrWus0qxba8i` | multipleRecordLinks | Links to Appointments (`tblo5X0nETYrtQ6bI`) |
+| Appointments | `fldcMrrWus0qxba8i` | multipleRecordLinks | Links to Schedule (`tblo5X0nETYrtQ6bI`) |
 | Record ID | `fld4T1EeyMJhy5PdE` | formula | `RECORD_ID()` |
 | Created | `fldXMa8koP1LCwQZj` | createdTime | |
 | Last Modified | `fldYo3mtE2C4ElMyO` | lastModifiedTime | |
@@ -178,12 +179,14 @@ All new tables were duplicated from **Template Table** and share the same 3 base
 |-------|----|------|-------|
 | Abreviation | `fldHUdk9ITWQ6mSiV` | singleLineText | Short code — primary field (note: typo in field name) |
 | Name | `fldCWflJhm4TpgzaI` | singleLineText | Full course name |
+| Lookup | `fldBxYhZAsHZ5Tn7G` | formula | `{Abreviation} & " - " & {Name}` — combined display string; read only |
 | Length | `fldzZ2kJsZPEi2dfr` | duration | h:mm format |
-| Age Options | `fldWr2bOGldhdpTOh` | multipleSelects | "T" (`selt54GaBqwlwleoH`) = Teen, "A" (`selF9kyGKXMeiNHH8`) = Adult |
+| Teen Distinct | `fldLzun9hEN0jzWQE` | checkbox | Whether the course is teen-specific |
 | Tier Options | `flduTGL79ThCqoHBH` | multipleSelects | "S" (`seloOQYDki8VoBLqC`), "EL" (`selpnEd6wU74Rv1zt`), "RL" (`selIJN8rLl7GKYcCJ`) |
-| Locations Options | `fldHv3fV08Vq5uyc8` | multipleSelects | "CH" (`selnomAuRRV5fsE6R`) = Colonial Heights, "GA" (`selgVKmnhhoUZYonU`) = Glen Allen |
+| Location Options | `fldHv3fV08Vq5uyc8` | multipleSelects | "CH" (`selnomAuRRV5fsE6R`) = Colonial Heights, "GA" (`selgVKmnhhoUZYonU`) = Glen Allen |
 | Spanish Offered | `fld7UztUuJefSRKeQ` | checkbox | Whether this course can be taught in Spanish |
 | PUDO Offered | `fld4S7xmH4bmZ0su5` | checkbox | Whether pick-up/drop-off is offered for this course |
+| Numbered | `fldQVeK9SiReYNBmn` | checkbox | Whether appointments for this course use class numbering |
 | Additional Requirements | `fldoL83911YET3o6C` | multilineText | Free-form additional requirements notes |
 | Type | `fldldJ1rrd6dsaqRC` | singleSelect | "In Car" (`sel1YgWAIaKJ5JF05`), "Classroom" (`sel8NCA25JWV1aXTB`) |
 | Prices | `fldzJJrWfRxAhTyec` | multipleRecordLinks | Links to Prices (`tblDZMwgA9Ay0JbRA`) |
@@ -205,7 +208,7 @@ All new tables were duplicated from **Template Table** and share the same 3 base
 
 ### Availability Fields
 
-**Last verified:** 2026-02-19 (live API)
+**Last verified:** 2026-02-20 (live API)
 
 | Field | ID | Type | Notes |
 |-------|----|------|-------|
@@ -229,33 +232,34 @@ All new tables were duplicated from **Template Table** and share the same 3 base
 
 > Table was formerly named "Appointments" in docs. Airtable table name is now "Schedule" (`tblo5X0nETYrtQ6bI`).
 
-**Last verified:** 2026-02-19 (live API)
+**Last verified:** 2026-02-20 (live API)
 
 | Field | ID | Type | Notes |
 |-------|----|------|-------|
-| Abreviation | `fldSsrlgL0Fhx6Ci4` | formula | Instructor + Student + Cars + Course + Class Number — primary display; read only |
+| Abreviation | `fldSsrlgL0Fhx6Ci4` | formula | Instructor + Student + Car + Course + Class Number — primary display; read only |
 | Student | `fldSGS6xsegcdEklh` | multipleRecordLinks | Links to Students (`tblpG4IVPaS8tq4bp`) |
 | Course | `fldy84c9JSS2ris1w` | multipleRecordLinks | Links to Courses (`tblthPfZN6r0FCD9P`) |
+| Name (from Course) | `fldUeLt9UGlCM2L46` | multipleLookupValues | Lookup: Course.Name — read only |
 | Instructor | `fldtQT4tfTJ5FCm9T` | multipleRecordLinks | Links to Instructors (`tblwm92MbaoRT2dSa`) |
 | Type (from Course) | `fldGxc1NcZ2YaII67` | multipleLookupValues | Lookup: Course.Type — "In Car" (`sel1YgWAIaKJ5JF05`) / "Classroom" (`sel8NCA25JWV1aXTB`); read only |
-| Cars | `fldPRZoDW0yAe2YwQ` | multipleRecordLinks | Links to Cars (`tblog7VBOinu5eVqp`) |
+| Car | `fldPRZoDW0yAe2YwQ` | multipleRecordLinks | Links to Cars (`tblog7VBOinu5eVqp`) |
 | Classroom | `flduE85AAa1DBFLtv` | singleSelect | "Class Room 1" (`selIjC2WTOnLTrk8z`), "Class Room 2" (`sel1YzU4ymsGzlIIP`) |
-| Name (from Course) | `fldUeLt9UGlCM2L46` | multipleLookupValues | Lookup: Course.Name — read only |
-| Locations Options (from Course) | `fldxfTefJ4xSiSU4O` | multipleLookupValues | Lookup: Course.Locations Options — "CH" / "GA"; read only |
+| Locations Options (from Course) | `fldxfTefJ4xSiSU4O` | multipleLookupValues | Lookup: Course.Location Options — "CH" / "GA"; read only |
 | Location | `fldkQZ5XXOZTqXPlm` | singleSelect | "CH" (`selPdzvazKRfWYRRL`) = Colonial Heights, "GA" (`selUXvKoLoACASQYG`) = Glen Allen |
-| Age Options (from Course) | `fld9fUgLPziU5WiUb` | multipleLookupValues | Lookup: Course.Age Options — "T" / "A"; read only |
+| Teen Distinct (from Course) | `fld9fUgLPziU5WiUb` | multipleLookupValues | Lookup: Course.Teen Distinct (checkbox) — read only |
+| Teen (from Student) | `fld8RazTycpbX2dbz` | multipleLookupValues | Lookup: Student.Teen (checkbox) — read only |
 | Age | `fldhdQS61vRqqbVJc` | singleSelect | "T" (`sel9nKw5tnRPpY8qC`) = Teen, "A" (`selC4gRIi0It7DRqO`) = Adult |
 | Tier Options (from Course) | `fldVFu0EN6v19tSPZ` | multipleLookupValues | Lookup: Course.Tier Options — "S" / "EL" / "RL"; read only |
 | Tier | `fldWMcjKhn1y7INxi` | singleSelect | "EL" (`selsRh2uHNRU15pIF`), "RL" (`selj5NjQlGb5U3bSh`) |
 | Spanish Offered (from Course) | `fldj52kkWsaDd1pyy` | multipleLookupValues | Lookup: Course.Spanish Offered — read only |
 | Spanish | `fld17lzRvlLbFdUa4` | checkbox | Whether this appointment is in Spanish |
 | PUDO Offered (from Course) | `fldKi9AiTLgUj9cYL` | multipleLookupValues | Lookup: Course.PUDO Offered — read only |
-| PUDO | `fld6nShioyE8NGlKH` | singleSelect | Pick-up/drop-off duration: "0:30" (`selkr4YTe8RGnbGTx`), "1:00" (`selmtSjiFUkrW58lB`) |
+| PUDO | `fld6nShioyE8NGlKH` | duration | Pick-up/drop-off duration (h:mm format, e.g. 0:30 or 1:00) |
 | Start | `fldSEIbrQiwpMhwB4` | dateTime | Appointment start datetime (America/New_York, 12hr) |
-| Pickup At | `fldOFlvxOnqvJAYEz` | formula | `IF({PUDO}=BLANK(), BLANK(), DATEADD({Start}, SWITCH({PUDO}, "0:30", 30, "1:00", 60, 0), "minutes"))` — read only |
+| Pickup At | `fldOFlvxOnqvJAYEz` | formula | `IF({PUDO}=BLANK(), BLANK(), DATEADD({Start}, {PUDO}/60, "minutes"))` — read only |
 | Length (from Course) | `fldv3IBKE2TiYhAhX` | multipleLookupValues | Lookup: Course.Length (used in End formula) — read only |
-| Dropoff At | `fldsPG5OdcFDuleX1` | formula | `IF({PUDO}=BLANK(), BLANK(), DATEADD({End}, -SWITCH({PUDO}, "0:30", 30, "1:00", 60, 0), "minutes"))` — read only |
-| End | `fldA4Cct6GbdTJf9v` | formula | `DATEADD({Start}, ({Length (from Course)}/60) + 2*SWITCH({PUDO}, "0:30", 30, "1:00", 60, 0), "minutes")` — read only |
+| Dropoff At | `fldsPG5OdcFDuleX1` | formula | `IF({PUDO}=BLANK(), BLANK(), DATEADD({End}, -{PUDO}/60, "minutes"))` — read only |
+| End | `fldA4Cct6GbdTJf9v` | formula | `DATEADD({Start}, ({Length (from Course)}/60) + (2*{PUDO}/60), "minutes")` — read only |
 | Class Number | `fldw5sIWilBYqwQdl` | number | Sequential class number within student's enrollment |
 | Notes | `fldwDBhLucKlzEiMu` | singleLineText | Free-form notes |
 | Record ID | `fldlXk1OUtz0S8ghl` | formula | `RECORD_ID()` — read only |
@@ -264,7 +268,7 @@ All new tables were duplicated from **Template Table** and share the same 3 base
 
 ### Prices Fields
 
-**Last verified:** 2026-02-19 (live API)
+**Last verified:** 2026-02-20 (live API)
 
 | Field | ID | Type | Notes |
 |-------|----|------|-------|
@@ -283,7 +287,7 @@ All new tables were duplicated from **Template Table** and share the same 3 base
 
 ### Instructors Fields
 
-**Last verified:** 2026-02-19 (live API)
+**Last verified:** 2026-02-20 (live API)
 
 | Field | ID | Type | Notes |
 |-------|----|------|-------|
@@ -293,10 +297,10 @@ All new tables were duplicated from **Template Table** and share the same 3 base
 | Capabilities | `fldd71WcnVHnEp6tP` | multipleSelects | "Spanish" (`selddAw3l8G6a7sed`), "Enhanced Learning" (`selun4gR1vxUObH1U`) |
 | Role | `fldgm6vIgy9h7D2zB` | multipleSelects | "Instructor" (`sel4VrYsahTuK05Zs`), "Office Admin" (`sel9CpMMpemt1xebv`), "Sales Staff" (`sel2qLouqC9RWOzYr`) |
 | Availability | `fldRTIb0HtZyZuhsL` | multipleRecordLinks | Links to Availability (`tbl5db09IrQR5rmgU`) |
-| Appointments | `fldiMi2l98HdCCHAW` | multipleRecordLinks | Links to Appointments (`tblo5X0nETYrtQ6bI`) |
 | Record ID | `fldtew3drKZqiknYN` | formula | `RECORD_ID()` |
 | Created | `fldiEzkgLsD4eLhHF` | formula | `CREATED_TIME()` |
 | Last Modified | `fldK1z3WvRgy1NucG` | formula | `LAST_MODIFIED_TIME()` |
+| Appointments | `fldiMi2l98HdCCHAW` | multipleRecordLinks | Links to Schedule (`tblo5X0nETYrtQ6bI`) |
 
 #### Instructor Records (all current)
 
@@ -321,7 +325,7 @@ All new tables were duplicated from **Template Table** and share the same 3 base
 
 > Table was formerly named "Vehicles" in docs. Airtable table name is "Cars" (`tblog7VBOinu5eVqp`).
 
-**Last verified:** 2026-02-19 (live API)
+**Last verified:** 2026-02-20 (live API)
 
 | Field | ID | Type | Notes |
 |-------|----|------|-------|

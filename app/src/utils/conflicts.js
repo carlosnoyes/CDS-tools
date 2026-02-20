@@ -93,7 +93,7 @@ export function checkInstructorConflict(allAppts, { startISO, endMs, instructorI
 export function checkCarConflict(allAppts, { startISO, endMs, carId, skipId, refData }) {
   if (!carId || !startISO || !endMs) return null;
   const conflicts = overlappingAppts(allAppts, startISO, endMs, skipId).filter(
-    (a) => a.fields.Cars?.[0] === carId
+    (a) => a.fields.Car?.[0] === carId
   );
   if (!conflicts.length) return null;
   const c = conflicts[0];
@@ -106,6 +106,93 @@ export function checkCarConflict(allAppts, { startISO, endMs, carId, skipId, ref
     fields: ["Cars", "startDate", "startTime"],
     message: `Car already in use ${start}–${end} (${instructorName} / ${studentName})`,
   };
+}
+
+/**
+ * W1 — Instructor not available at the proposed time.
+ * W2 — Selected car not in instructor's availability window.
+ *
+ * Returns an array of warning objects (severity: "warning").
+ * Warnings do not block submission — they are surfaced in orange.
+ *
+ * @param {Array} availIntervals - Output of expandAvailability(records, targetDate)
+ *   Each entry: { instructorId, vehicleId, startMs, endMs }
+ * @param {object} formValues - { startISO, endMs, instructorId, carId }
+ * @param {object} refData
+ */
+export function checkAvailabilityWarnings(availIntervals, { startISO, endMs, instructorId, carId }, refData) {
+  if (!instructorId || !startISO || !endMs) return [];
+
+  const propStart = new Date(startISO).getTime();
+
+  // Find all availability windows for this instructor on this day
+  const instructorWindows = availIntervals.filter((w) => w.instructorId === instructorId);
+
+  // W1 — no window covers the full appointment time
+  const coveringWindow = instructorWindows.find(
+    (w) => w.startMs <= propStart && w.endMs >= endMs
+  );
+
+  if (!coveringWindow) {
+    const instructorName = refData.instructorMap[instructorId]?.["Full Name"] ?? "This instructor";
+    return [{
+      type: "W1",
+      severity: "warning",
+      fields: ["Instructor", "startDate", "startTime"],
+      message: `${instructorName} has no availability window covering this time.`,
+    }];
+  }
+
+  // W2 — car selected doesn't match the car in the covering window
+  const warnings = [];
+  if (carId && coveringWindow.vehicleId && carId !== coveringWindow.vehicleId) {
+    const instructorName = refData.instructorMap[instructorId]?.["Full Name"] ?? null;
+    const selectedCarName = refData.vehicleMap[carId]?.["Car Name"] ?? null;
+
+    // Line 1: what car is the instructor actually scheduled with?
+    const instructorCarName = refData.vehicleMap[coveringWindow.vehicleId]?.["Car Name"] ?? null;
+    const line1 = instructorName && instructorCarName
+      ? `${instructorName} should be scheduled for ${instructorCarName} at this time.`
+      : null;
+
+    // Line 2: which instructor is the selected car scheduled with?
+    const carOwnerWindow = availIntervals.find(
+      (w) => w.vehicleId === carId && w.instructorId !== instructorId
+        && w.startMs <= propStart && w.endMs >= endMs
+    );
+    const carOwnerName = carOwnerWindow
+      ? (refData.instructorMap[carOwnerWindow.instructorId]?.["Full Name"] ?? null)
+      : null;
+    const line2 = selectedCarName && carOwnerName
+      ? `${selectedCarName} is scheduled for ${carOwnerName} at this time.`
+      : null;
+
+    const message = (line1 || line2)
+      ? [line1, line2].filter(Boolean).join("\n")
+      : `${selectedCarName ?? "This car"} is not the car scheduled for ${instructorName ?? "this instructor"} at this time.`;
+
+    warnings.push({
+      type: "W2",
+      severity: "warning",
+      fields: ["Cars"],
+      message,
+    });
+  }
+
+  return warnings;
+}
+
+/**
+ * Given availability records and a proposed start time, find the car linked to
+ * the instructor's covering availability window (if any). Returns vehicleId or null.
+ */
+export function getAvailabilityCar(availIntervals, startISO, endMs, instructorId) {
+  if (!instructorId || !startISO || !endMs) return null;
+  const propStart = new Date(startISO).getTime();
+  const window = availIntervals.find(
+    (w) => w.instructorId === instructorId && w.startMs <= propStart && w.endMs >= endMs
+  );
+  return window?.vehicleId ?? null;
 }
 
 /**

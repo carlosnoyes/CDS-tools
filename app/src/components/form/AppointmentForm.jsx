@@ -8,7 +8,9 @@ import { Label } from "@/components/ui/label";
 import LinkedSelect from "./LinkedSelect";
 import { CLASSROOMS, PUDO_OPTIONS, LOCATION_LABELS } from "@/utils/constants";
 import { useCreateAppointment, useUpdateAppointment, useAppointments } from "@/hooks/useAppointments";
-import { detectConflicts } from "@/utils/conflicts";
+import { useAvailability } from "@/hooks/useAvailability";
+import { detectConflicts, checkAvailabilityWarnings, getAvailabilityCar } from "@/utils/conflicts";
+import { expandAvailability } from "@/utils/availability";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -35,6 +37,19 @@ function computeEndTime(startISO, courseLengthSec, pudoOption) {
   return isNaN(end.getTime()) ? null : format(end, "h:mm a");
 }
 
+// PUDO is stored in Airtable as a duration (integer seconds). Convert to/from display string.
+function pudoToSeconds(pudoOption) {
+  if (pudoOption === "0:30") return 1800;
+  if (pudoOption === "1:00") return 3600;
+  return null;
+}
+
+function pudoFromSeconds(seconds) {
+  if (seconds === 1800) return "0:30";
+  if (seconds === 3600) return "1:00";
+  return "";
+}
+
 // Shift a startDate string forward by N weeks
 function shiftDateByWeeks(dateStr, weeks) {
   if (!dateStr) return dateStr;
@@ -43,8 +58,22 @@ function shiftDateByWeeks(dateStr, weeks) {
   } catch { return dateStr; }
 }
 
-function defaultValues(record) {
-  if (!record) return { pudo: "" };
+function todayStr() {
+  return format(new Date(), "yyyy-MM-dd");
+}
+
+function defaultValues(record, prefill) {
+  if (!record) {
+    return {
+      pudo: "", classNumber: "", Notes: "",
+      Classroom: "", Tier: "", Location: "", Spanish: false,
+      startDate:  prefill?.startDate  ?? todayStr(),
+      startTime:  prefill?.startTime  ?? "08:00",
+      Instructor: prefill?.instructorId ?? "",
+      Cars:       prefill?.carId        ?? "",
+      Student: "", Course: "",
+    };
+  }
   const f = record.fields;
   return {
     Student:     f.Student?.[0]    ?? "",
@@ -54,18 +83,17 @@ function defaultValues(record) {
     startTime:   toTimeInput(f.Start),
     classNumber: f["Class Number"] ?? "",
     Notes:       f.Notes           ?? "",
-    Cars:        f.Cars?.[0]       ?? "",
+    Cars:        f.Car?.[0]        ?? "",
     Classroom:   f.Classroom       ?? "",
-    Age:         f.Age             ?? "",
     Tier:        f.Tier            ?? "",
     Location:    f.Location        ?? "",
     Spanish:     f.Spanish         ?? false,
-    pudo:        f.PUDO            ?? "",
+    pudo:        pudoFromSeconds(f.PUDO),
   };
 }
 
 // Build Airtable fields object from form data + course flags
-function buildFields(data, { isInCar, isClassroom, ageOptions, tierOptions, locOptions, spanishOffered, pudoOffered }) {
+function buildFields(data, { isInCar, isClassroom, tierOptions, locOptions, spanishOffered, pudoOffered }) {
   const fields = {
     Student:        data.Student    ? [data.Student]    : undefined,
     Course:         data.Course     ? [data.Course]     : undefined,
@@ -74,13 +102,12 @@ function buildFields(data, { isInCar, isClassroom, ageOptions, tierOptions, locO
     "Class Number": data.classNumber ? Number(data.classNumber) : undefined,
     Notes:          data.Notes || undefined,
   };
-  if (isInCar)          fields.Cars      = data.Cars      ? [data.Cars] : undefined;
+  if (isInCar)          fields.Car       = data.Cars      ? [data.Cars] : undefined;
   if (isClassroom)      fields.Classroom = data.Classroom || undefined;
-  if (ageOptions.length)   fields.Age    = data.Age       || undefined;
   if (tierOptions.length)  fields.Tier   = data.Tier      || undefined;
   if (locOptions.length)   fields.Location = data.Location || undefined;
   if (spanishOffered)   fields.Spanish   = !!data.Spanish;
-  if (pudoOffered)      fields.PUDO      = data.pudo      || undefined;
+  if (pudoOffered)      fields.PUDO      = pudoToSeconds(data.pudo) ?? undefined;
   Object.keys(fields).forEach((k) => { if (fields[k] === undefined) delete fields[k]; });
   return fields;
 }
@@ -88,13 +115,15 @@ function buildFields(data, { isInCar, isClassroom, ageOptions, tierOptions, locO
 // ─── Shared form fields panel ─────────────────────────────────────────────────
 // Renders all the form controls. Used for both single and bulk draft panels.
 
-function AppointmentFields({ form, refData, courseFlags, courseLengthSec, conflictByField = {} }) {
+function AppointmentFields({ form, refData, courseFlags, courseLengthSec, conflictByField = {}, warningByField = {} }) {
   const { register, setValue, watch, formState: { errors } } = form;
-  const { isInCar, isClassroom, ageOptions, tierOptions, locOptions, spanishOffered, pudoOffered } = courseFlags;
+  const { isInCar, isClassroom, isNumbered, tierOptions, locOptions, spanishOffered, pudoOffered } = courseFlags;
 
-  // Returns extra className for a field if it has a conflict
+  // Returns extra className for a field — red for errors, orange for warnings
   function conflictClass(fieldName) {
-    return conflictByField[fieldName] ? " ring-2 ring-destructive ring-offset-0" : "";
+    if (conflictByField[fieldName]) return " ring-2 ring-destructive ring-offset-0";
+    if (warningByField[fieldName])  return " ring-2 ring-amber-400 ring-offset-0";
+    return "";
   }
 
   const startDate_ = watch("startDate");
@@ -134,6 +163,9 @@ function AppointmentFields({ form, refData, courseFlags, courseLengthSec, confli
           <LinkedSelect value={watch("Instructor")} onChange={(v) => setValue("Instructor", v)}
             options={refData.instructorOptions} placeholder="Select instructor..." />
         </div>
+        {warningByField["Instructor"] && (
+          <p className="text-xs text-amber-600">{warningByField["Instructor"].message}</p>
+        )}
       </div>
 
       <div className="space-y-1">
@@ -157,16 +189,18 @@ function AppointmentFields({ form, refData, courseFlags, courseLengthSec, confli
         <div className="w-full border rounded-md px-3 py-2 text-sm bg-muted text-muted-foreground min-h-[38px] flex items-center">
           {computedEndDisplay ?? <span className="opacity-50">-</span>}
         </div>
-        <p className="text-xs text-muted-foreground">Course length + PUDO x 2</p>
       </div>
 
       {isInCar && (
         <div className="space-y-1">
-          <Label>Car</Label>
+          <Label>Car <span className="text-destructive">*</span></Label>
           <div className={"rounded-md" + conflictClass("Cars")}>
             <LinkedSelect value={watch("Cars")} onChange={(v) => setValue("Cars", v)}
               options={refData.vehicleOptions} placeholder="Select car..." />
           </div>
+          {!watch("Cars") && conflictByField["Cars"] && (
+            <p className="text-xs text-destructive">Car is required for In Car courses.</p>
+          )}
         </div>
       )}
 
@@ -181,20 +215,9 @@ function AppointmentFields({ form, refData, courseFlags, courseLengthSec, confli
         </div>
       )}
 
-      {ageOptions.length > 0 && (
-        <div className="space-y-1">
-          <Label>Age</Label>
-          <select value={watch("Age")} onChange={(e) => setValue("Age", e.target.value)}
-            className="w-full border rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-ring">
-            <option value="">Select...</option>
-            {ageOptions.map((a) => <option key={a} value={a}>{a === "T" ? "Teen" : "Adult"}</option>)}
-          </select>
-        </div>
-      )}
-
       {tierOptions.length > 0 && (
         <div className="space-y-1">
-          <Label>Tier</Label>
+          <Label>Higher Tier</Label>
           <select value={watch("Tier")} onChange={(e) => setValue("Tier", e.target.value)}
             className="w-full border rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-ring">
             <option value="">None</option>
@@ -233,11 +256,13 @@ function AppointmentFields({ form, refData, courseFlags, courseLengthSec, confli
         </div>
       )}
 
-      <div className="space-y-1">
-        <Label htmlFor="classNumber">Class #</Label>
-        <Input id="classNumber" type="number" min={1} placeholder="Auto" {...register("classNumber")} />
-        <p className="text-xs text-muted-foreground">Auto-calculated; override if needed</p>
-      </div>
+      {isNumbered && (
+        <div className="space-y-1">
+          <Label htmlFor="classNumber">Class #</Label>
+          <Input id="classNumber" type="number" min={1} placeholder="Auto" {...register("classNumber")} />
+          <p className="text-xs text-muted-foreground">Auto-calculated; override if needed</p>
+        </div>
+      )}
 
       <div className="col-span-2 space-y-1">
         <Label htmlFor="Notes">Notes</Label>
@@ -250,7 +275,7 @@ function AppointmentFields({ form, refData, courseFlags, courseLengthSec, confli
 
 // ─── AppointmentForm ──────────────────────────────────────────────────────────
 
-export default function AppointmentForm({ record, refData, onClose, startDate, endDate }) {
+export default function AppointmentForm({ record, prefill, refData, onClose, startDate, endDate, onDateChange }) {
   const isEdit = !!record;
   const create = useCreateAppointment(startDate, endDate);
   const update = useUpdateAppointment(startDate, endDate);
@@ -261,12 +286,14 @@ export default function AppointmentForm({ record, refData, onClose, startDate, e
   const [activeDraft, setActiveDraft] = useState(0);  // 0 = base form; 1..N = override forms
   const [draftOverrides, setDraftOverrides] = useState({});  // index → partial overrides
   const [submitting, setSubmitting] = useState(false);
+  const [submitAttempted, setSubmitAttempted] = useState(false);
 
   // Base form (always present — used for single AND as template for bulk)
-  const baseForm = useForm({ defaultValues: defaultValues(record) });
+  const baseForm = useForm({ defaultValues: defaultValues(record, prefill) });
   const { watch: watchBase, setValue: setBaseValue, reset: resetBase, handleSubmit: handleBaseSubmit } = baseForm;
 
-  useEffect(() => { resetBase(defaultValues(record)); }, [record?.id]);
+  // Reset form whenever record or prefill changes (new click or new edit)
+  useEffect(() => { resetBase(defaultValues(record, prefill)); }, [record?.id, prefill]);
 
   // Course-derived flags from base form's Course selection
   const courseId  = watchBase("Course");
@@ -277,25 +304,27 @@ export default function AppointmentForm({ record, refData, onClose, startDate, e
     [courseId, refData.courseMap]
   );
 
-  const isInCar       = !courseFields || courseFields["Type"] === "In Car" || !courseFields["Type"];
-  const isClassroom   = courseFields?.["Type"] === "Classroom";
-  const ageOptions    = useMemo(() => courseFields?.["Age Options"]       ?? [], [courseFields]);
-  const tierOptions   = useMemo(() => courseFields?.["Tier Options"]      ?? [], [courseFields]);
-  const locOptions    = useMemo(() => courseFields?.["Locations Options"] ?? [], [courseFields]);
+  const isInCar        = !!(courseFields && courseFields["Type"] === "In Car");
+  const isClassroom    = !!(courseFields?.["Type"] === "Classroom");
+  const isNumbered     = !!(courseFields?.["Numbered"]);
+  const tierOptions    = useMemo(() => courseFields?.["Tier Options"]     ?? [], [courseFields]);
+  const locOptions     = useMemo(() => courseFields?.["Location Options"] ?? [], [courseFields]);
   const spanishOffered = !!(courseFields?.["Spanish Offered"]);
   const pudoOffered    = !!(courseFields?.["PUDO Offered"]);
-  const courseFlags = { isInCar, isClassroom, ageOptions, tierOptions, locOptions, spanishOffered, pudoOffered };
+  const courseFlags = { isInCar, isClassroom, isNumbered, tierOptions, locOptions, spanishOffered, pudoOffered };
   const courseLengthSec = Number(courseFields?.["Length"]) || 0;
 
   // Reset conditional fields on course change
   useEffect(() => {
     if (!courseId) return;
-    if (!isInCar)          setBaseValue("Cars", "");
-    if (!isClassroom)      setBaseValue("Classroom", "");
-    if (!spanishOffered)   setBaseValue("Spanish", false);
-    if (!pudoOffered)      setBaseValue("pudo", "");
-    if (!ageOptions.length)  setBaseValue("Age", "");
+    if (!isInCar)            setBaseValue("Cars", "");
+    if (isClassroom && !baseForm.getValues("Classroom")) setBaseValue("Classroom", "Class Room 1");
+    if (!isClassroom)        setBaseValue("Classroom", "");
+    if (!isNumbered)         setBaseValue("classNumber", "");
+    if (!spanishOffered)     setBaseValue("Spanish", false);
+    if (!pudoOffered)        setBaseValue("pudo", "");
     if (!tierOptions.length) setBaseValue("Tier", "");
+    if (locOptions.length && !baseForm.getValues("Location")) setBaseValue("Location", "CH");
     if (!locOptions.length)  setBaseValue("Location", "");
   }, [courseId]);
 
@@ -322,6 +351,11 @@ export default function AppointmentForm({ record, refData, onClose, startDate, e
   const startDate_   = watchBase("startDate");
   const startTime_   = watchBase("startTime");
   const pudoVal      = watchBase("pudo");
+
+  // Notify parent when date changes (used by sidebar to navigate the calendar)
+  useEffect(() => {
+    if (startDate_ && onDateChange) onDateChange(startDate_);
+  }, [startDate_]);
 
   const baseStartISO = useMemo(
     () => {
@@ -352,6 +386,57 @@ export default function AppointmentForm({ record, refData, onClose, startDate, e
     }
     return map;
   }, [conflicts]);
+
+  // Also flag missing Car as a hard error for In Car courses — only after a submit attempt
+  const carMissing = submitAttempted && isInCar && !carId;
+  const conflictByFieldWithCar = useMemo(() => {
+    if (!carMissing) return conflictByField;
+    return { ...conflictByField, Cars: { type: "E4", fields: ["Cars"], message: "Car is required for In Car courses." } };
+  }, [conflictByField, carMissing]);
+
+  // 9b — Availability warnings (W1/W2) — use cached availability data
+  const { data: availRecords = [] } = useAvailability();
+
+  // Expand availability for the selected date
+  const availIntervalsForDate = useMemo(() => {
+    if (!startDate_) return [];
+    try {
+      return expandAvailability(availRecords, new Date(startDate_ + "T00:00:00"));
+    } catch { return []; }
+  }, [availRecords, startDate_]);
+
+  // Compute end ms for warning checks (same as conflicts but extracted)
+  const baseEndMs = useMemo(() => {
+    if (!baseStartISO) return null;
+    const pudoMinutes = pudoVal === "0:30" ? 30 : pudoVal === "1:00" ? 60 : 0;
+    return new Date(baseStartISO).getTime() + ((courseLengthSec ?? 0) + pudoMinutes * 2 * 60) * 1000;
+  }, [baseStartISO, courseLengthSec, pudoVal]);
+
+  const warnings = useMemo(() => {
+    if (!baseStartISO || !baseEndMs || !isInCar) return [];
+    return checkAvailabilityWarnings(
+      availIntervalsForDate,
+      { startISO: baseStartISO, endMs: baseEndMs, instructorId, carId },
+      refData
+    );
+  }, [availIntervalsForDate, baseStartISO, baseEndMs, instructorId, carId, isInCar, refData]);
+
+  const warningByField = useMemo(() => {
+    const map = {};
+    for (const w of warnings) {
+      for (const f of w.fields) {
+        if (!map[f]) map[f] = w;
+      }
+    }
+    return map;
+  }, [warnings]);
+
+  // Auto-populate Car from instructor's availability window when Car is empty
+  useEffect(() => {
+    if (!isInCar || !instructorId || !baseStartISO || !baseEndMs || carId) return;
+    const vehicleId = getAvailabilityCar(availIntervalsForDate, baseStartISO, baseEndMs, instructorId);
+    if (vehicleId) setBaseValue("Cars", vehicleId);
+  }, [instructorId, baseStartISO, baseEndMs, availIntervalsForDate, isInCar]);
 
   // Bulk draft conflict tracking
   const [draftConflicts, setDraftConflicts] = useState({});  // index → conflict[]
@@ -386,8 +471,9 @@ export default function AppointmentForm({ record, refData, onClose, startDate, e
 
   // ── Single submit ─────────────────────────────────────────────────────────
   async function onSingleSubmit(data) {
-    // Final gate: block if any conflicts remain
-    if (conflicts.length > 0) {
+    setSubmitAttempted(true);
+    // Final gate: block if any hard errors remain
+    if (conflicts.length > 0 || (isInCar && !data.Cars)) {
       toast.error("Resolve scheduling conflicts before saving");
       return;
     }
@@ -408,6 +494,7 @@ export default function AppointmentForm({ record, refData, onClose, startDate, e
 
   // ── Bulk submit ───────────────────────────────────────────────────────────
   async function onBulkSubmit() {
+    setSubmitAttempted(true);
     // Check all drafts for conflicts before submitting
     const draftCheckResults = Array.from({ length: bulkCount }, (_, i) => {
       const vals = getMergedDraftValues(i);
@@ -456,50 +543,36 @@ export default function AppointmentForm({ record, refData, onClose, startDate, e
   }
 
   const isBusy = submitting || create.isPending || update.isPending;
-  const hasConflicts = conflicts.length > 0;
+  const hasConflicts = conflicts.length > 0 || carMissing;
 
   // ─── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-4">
 
-      {/* ── Bulk mode controls (create mode only) ── */}
-      {!isEdit && (
-        <div className="flex items-center gap-3 pb-1 border-b">
-          <div className="flex rounded-md border overflow-hidden text-xs">
-            <button
-              type="button"
-              onClick={() => { setBulkMode(false); setActiveDraft(0); }}
-              className={"px-3 py-1 font-medium transition-colors " + (!bulkMode ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted")}
-            >
-              Schedule One
-            </button>
-            <button
-              type="button"
-              onClick={() => setBulkMode(true)}
-              className={"px-3 py-1 font-medium border-l transition-colors " + (bulkMode ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted")}
-            >
-              Bulk Schedule
-            </button>
-          </div>
-
-          {bulkMode && (
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">Count:</span>
-              <Input
-                type="number"
-                min={2}
-                max={20}
-                value={bulkCount}
-                onChange={(e) => {
-                  const n = Math.max(2, Math.min(20, Number(e.target.value)));
-                  setBulkCount(n);
-                  if (activeDraft >= n) setActiveDraft(n - 1);
-                }}
-                className="w-16 h-7 text-xs"
-              />
-              <span className="text-xs text-muted-foreground">appointments, +1 week each</span>
-            </div>
-          )}
+      {/* ── Bulk count input (shown when bulk mode is active) ── */}
+      {!isEdit && bulkMode && (
+        <div className="flex items-center gap-2 pb-1 border-b">
+          <span className="text-xs text-muted-foreground">Count:</span>
+          <Input
+            type="number"
+            min={2}
+            max={20}
+            value={bulkCount}
+            onChange={(e) => {
+              const n = Math.max(2, Math.min(20, Number(e.target.value)));
+              setBulkCount(n);
+              if (activeDraft >= n) setActiveDraft(n - 1);
+            }}
+            className="w-16 h-7 text-xs"
+          />
+          <span className="text-xs text-muted-foreground">appointments, +1 week each</span>
+          <button
+            type="button"
+            onClick={() => { setBulkMode(false); setActiveDraft(0); }}
+            className="ml-auto text-xs text-muted-foreground hover:text-foreground underline"
+          >
+            Cancel bulk
+          </button>
         </div>
       )}
 
@@ -539,16 +612,30 @@ export default function AppointmentForm({ record, refData, onClose, startDate, e
       {!bulkMode ? (
         // Single mode — base form directly
         <form onSubmit={handleBaseSubmit(onSingleSubmit)} className="space-y-4">
-          {hasConflicts && (
+          {conflicts.length > 0 && (
             <div className="rounded-md bg-destructive/10 border border-destructive/30 px-3 py-2 space-y-1">
               {conflicts.map((c) => (
                 <p key={c.type} className="text-xs text-destructive font-medium">{c.message}</p>
               ))}
             </div>
           )}
-          <AppointmentFields form={baseForm} refData={refData} courseFlags={courseFlags} courseLengthSec={courseLengthSec} conflictByField={conflictByField} />
+          {warnings.length > 0 && (
+            <div className="rounded-md bg-amber-50 border border-amber-300 px-3 py-2 space-y-1">
+              {warnings.map((w) =>
+                w.message.split("\n").map((line, i) => (
+                  <p key={w.type + i} className="text-xs text-amber-700 font-medium">{line}</p>
+                ))
+              )}
+            </div>
+          )}
+          <AppointmentFields form={baseForm} refData={refData} courseFlags={courseFlags} courseLengthSec={courseLengthSec} conflictByField={conflictByFieldWithCar} warningByField={warningByField} />
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="outline" onClick={onClose} disabled={isBusy}>Cancel</Button>
+            {!isEdit && (
+              <Button type="button" variant="outline" onClick={() => setBulkMode(true)} disabled={isBusy}>
+                Bulk Schedule
+              </Button>
+            )}
             <Button type="submit" disabled={isBusy || hasConflicts}>
               {isBusy ? "Saving..." : isEdit ? "Save Changes" : "Create Appointment"}
             </Button>
@@ -591,7 +678,7 @@ export default function AppointmentForm({ record, refData, onClose, startDate, e
 // Renders a draft's fields as controlled inputs (no react-hook-form for simplicity).
 
 function BulkDraftPanel({ draftIndex, values, refData, courseFlags, courseLengthSec, onFieldChange }) {
-  const { isInCar, isClassroom, ageOptions, tierOptions, locOptions, spanishOffered, pudoOffered } = courseFlags;
+  const { isInCar, isClassroom, tierOptions, locOptions, spanishOffered, pudoOffered } = courseFlags;
   const v = values;
 
   const startISO = useMemo(() => combineDateTime(v.startDate, v.startTime), [v.startDate, v.startTime]);
@@ -658,19 +745,9 @@ function BulkDraftPanel({ draftIndex, values, refData, courseFlags, courseLength
           </div>
         )}
 
-        {ageOptions.length > 0 && (
-          <div className="space-y-1">
-            <Label>Age</Label>
-            <select {...field("Age")} className="w-full border rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-ring">
-              <option value="">Select...</option>
-              {ageOptions.map((a) => <option key={a} value={a}>{a === "T" ? "Teen" : "Adult"}</option>)}
-            </select>
-          </div>
-        )}
-
         {tierOptions.length > 0 && (
           <div className="space-y-1">
-            <Label>Tier</Label>
+            <Label>Higher Tier</Label>
             <select {...field("Tier")} className="w-full border rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-ring">
               <option value="">None</option>
               {tierOptions.map((t) => <option key={t} value={t}>{t}</option>)}

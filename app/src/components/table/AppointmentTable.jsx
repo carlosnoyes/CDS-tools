@@ -33,7 +33,7 @@ function getSort(appt, key, maps) {
     case "end": return f.End ?? "";
     case "student": return maps.studentMap[f.Student?.[0]]?.["Full Name"] ?? "";
     case "instructor": return maps.instructorMap[f.Instructor?.[0]]?.["Full Name"] ?? "";
-    case "vehicle": return maps.vehicleMap[f.Vehicle?.[0]]?.["Car Name"] ?? "";
+    case "vehicle": return maps.vehicleMap[f.Car?.[0]]?.["Car Name"] ?? "";
     case "course": return (f["Name (from Course)"] ?? [])[0] ?? "";
     case "classNumber": return f["Class Number"] ?? 0;
     case "pudu": return f.PUDO ?? 0;
@@ -102,7 +102,7 @@ export default function AppointmentTable({ appointments, refData, onEdit }) {
             const studentName =
               refData.studentMap[f.Student?.[0]]?.["Full Name"] ?? "—";
             const vehicleName =
-              refData.vehicleMap[f.Vehicle?.[0]]?.["Car Name"] ?? "—";
+              refData.vehicleMap[f.Car?.[0]]?.["Car Name"] ?? "—";
             const courseName = (f["Name (from Course)"] ?? [])[0] ?? "—";
 
             return (

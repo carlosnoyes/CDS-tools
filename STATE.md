@@ -32,7 +32,7 @@
 | Availability table ID | `tbl5db09IrQR5rmgU` — 13 fields (Record ID, Instructor, Vehicle, Status, Day of Week, Start, Shift Length, End, Notes, Repeate Until, Cadence, Created, Last Modified) |
 | Note | "Appointments" table renamed to "Schedule"; "Vehicles" table renamed to "Cars"; Emails table removed from base |
 | Note | All new tables duplicated from Template Table; have Record ID, Created, Last Modified by default |
-| **Last synced** | 2026-02-19 |
+| **Last synced** | 2026-02-20 |
 | Full schema | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#airtable-base) |
 
 ## Availability — Schema (rebuilt 2026-02-18)
@@ -45,20 +45,20 @@
 - `Vehicle` link added — Availability can be linked to a vehicle as well as an instructor
 - Old `Week 1`/`Week 2` bi-weekly anchor approach may still apply in scheduling logic but is no longer encoded as a field value
 
-## Schedule — Schema (updated 2026-02-19)
+## Schedule — Schema (updated 2026-02-20)
 
-> Table renamed from "Appointments" to "Schedule" in Airtable (ID unchanged: `tblo5X0nETYrtQ6bI`). "Vehicle" link field renamed to "Cars".
+> Table renamed from "Appointments" to "Schedule" in Airtable (ID unchanged: `tblo5X0nETYrtQ6bI`). "Vehicle" link field renamed to "Car" (singular).
 
-- Links: Student, Instructor, Cars, Course (all multipleRecordLinks)
-- Timing: `Start` (dateTime) + Course `Length` (lookup) + `PUDO` (singleSelect) => `End` (formula)
-- `PUDO` is a singleSelect ("0:30" or "1:00"), NOT a duration field — SWITCH used in formula
-- `PUDO` is added twice (pickup + dropoff) in the End formula
+- Links: Student, Instructor, Car, Course (all multipleRecordLinks)
+- Timing: `Start` (dateTime) + Course `Length` (lookup) + `PUDO` (duration) => `End` (formula)
+- `PUDO` is a duration field (h:mm format, e.g. 0:30 or 1:00), NOT a singleSelect — duration math used in formulas
+- `PUDO` is added twice (pickup + dropoff) in the End formula: `{PUDO}/60` gives minutes
 - `Pickup At` and `Dropoff At` are new formula fields computing those datetimes from Start/End + PUDO
 - `Location`: "CH" (Colonial Heights) or "GA" (Glen Allen) — values changed from full names to abbreviations
 - `Classroom`: new singleSelect — "Class Room 1" or "Class Room 2"
 - `Age`, `Tier`, `Spanish`, `PUDO` (schedule-level): new singleSelect/checkbox fields set per appointment
 - Corresponding `**(from Course)**` lookup fields pull allowed values from linked course
-- `Abreviation`: auto-formula combining Instructor + Student + Cars + Course + Class Number
+- `Abreviation`: auto-formula combining Instructor + Student + Car + Course + Class Number
 
 ## Prices — Schema (updated 2026-02-19)
 
@@ -68,15 +68,19 @@
 - `Online` (checkbox): online rate flag — new field added
 - `Version` and `Expires On` and `Unique Abreviation` fields were removed from the live base
 
-## Courses — Schema (updated 2026-02-19)
+## Courses — Schema (updated 2026-02-20)
 
 - Old checkboxes (`Classroom`, `In Car`, `Online`) removed
 - Now has `Type` singleSelect ("In Car" / "Classroom") instead
-- New fields: `Age Options` (multipleSelects: T/A), `Tier Options` (multipleSelects: S/EL/RL), `Locations Options` (multipleSelects: CH/GA), `Spanish Offered` (checkbox), `PUDO Offered` (checkbox), `Additional Requirements` (multilineText)
+- Fields: `Teen Distinct` (checkbox), `Tier Options` (multipleSelects: S/EL/RL), `Location Options` (multipleSelects: CH/GA), `Spanish Offered` (checkbox), `PUDO Offered` (checkbox), `Additional Requirements` (multilineText), `Numbered` (checkbox)
+- `Lookup` formula field: `{Abreviation} & " - " & {Name}` — combined display string
+- Note: `Age Options` (multipleSelects T/A) was removed; replaced by `Teen Distinct` (checkbox) on the Course and `Teen` (checkbox) on Students
+- Note: field is named "Location Options" (not "Locations Options") in Airtable
 
-## Students — Schema (updated 2026-02-19)
+## Students — Schema (updated 2026-02-20)
 
-- New field: `Guardian Relation` (`fldbWdPSN5Nev2blX`, singleLineText) — between Guardian Last Name and Guardian Phone
+- `Guardian Relation` (`fldbWdPSN5Nev2blX`, singleLineText) — between Guardian Last Name and Guardian Phone
+- `Teen` (`fldMZsgc6M6tjSM4N`, checkbox) — between Guardian Email and Address
 
 ## Open Questions
 

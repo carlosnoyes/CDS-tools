@@ -11,6 +11,7 @@ export default function AppointmentModal({
   open,
   onOpenChange,
   record,
+  prefill,
   refData,
   startDate,
   endDate,
@@ -37,6 +38,7 @@ export default function AppointmentModal({
 
         <AppointmentForm
           record={record}
+          prefill={prefill}
           refData={refData}
           onClose={close}
           startDate={startDate}

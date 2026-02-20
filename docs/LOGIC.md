@@ -42,10 +42,10 @@ These are the only fields the app ever writes to. Everything else is computed by
 |-------|------|-------|
 | Student | multipleRecordLinks → Students | Array of one record ID |
 | Instructor | multipleRecordLinks → Instructors | Array of one record ID |
-| Cars | multipleRecordLinks → Cars | Array of one record ID; only for In Car courses |
+| Car | multipleRecordLinks → Cars | Array of one record ID; only for In Car courses |
 | Course | multipleRecordLinks → Courses | Array of one record ID |
 | Start | dateTime | ISO 8601; Eastern timezone in Airtable |
-| PUDO | singleSelect | `""` (none), `"0:30"`, `"1:00"` — stored as a string |
+| PUDO | duration (seconds) | `null` (none), `1800` (30 min), `3600` (60 min) — stored as integer seconds; UI displays as `"0:30"` / `"1:00"` |
 | Class Number | number | Integer; auto-calculated in UI, editable override |
 | Location | singleSelect | `"CH"` (Colonial Heights) or `"GA"` (Glen Allen); conditional on course |
 | Notes | singleLineText | Free text |
@@ -164,33 +164,58 @@ The calendar is a single unified view with toolbar controls. All weeks of the ye
 
 ##### Axis Zoom
 
-- **Vertical axis zoom**: double-click the time gutter (left edge) to enter vertical zoom mode (blue ring indicator). While in this mode, scroll the mouse wheel to stretch or compress the row height per hour (`PX_PER_HOUR`). Press Esc or click anywhere else to lock in the zoom level and exit zoom mode.
-- **Horizontal axis zoom**: double-click the day-header row (top edge) to enter horizontal zoom mode. While in this mode, scroll the mouse wheel to stretch or compress column width per day. Press Esc or click anywhere to exit.
-- **Scroll lock**: while either zoom mode is active, the container scroll is completely blocked — the wheel only affects the zoom value, not page position.
-- Both zoom levels are independent and persist while the user is on the calendar page.
+**Drag-to-resize (primary zoom mechanism):**
+- **Column width**: a thin drag handle sits on the right border of each day column header. Dragging it left/right resizes all columns simultaneously — all columns always share the same width. The cursor changes to `col-resize` on hover.
+- **Time gutter width**: a drag handle sits on the right border of the hour-axis bar (left edge of the grid). Dragging it left/right resizes the time gutter. This is independent of column width.
+- Both handles snap to a minimum size to keep the UI legible.
+- Horizontal column range: 60–1200 px/col. Time gutter range: 40–200 px.
+
+**Scroll-wheel zoom (secondary / fine-tune):**
+- **Vertical axis zoom**: double-click the time gutter to enter vertical zoom mode (blue ring indicator). While active, scroll the mouse wheel to stretch or compress `PX_PER_HOUR`. Press Esc or click anywhere else to exit.
+- **Horizontal axis zoom**: double-click the day-header row to enter horizontal zoom mode. While active, scroll the mouse wheel to stretch or compress column width.
+- **Scroll lock**: while either scroll-zoom mode is active, container scroll is completely blocked — the wheel only affects the zoom value, not page position.
 - Vertical range: 20–600 px/hr. Horizontal range: 60–1200 px/col.
+- Both zoom levels are independent and persist while the user is on the calendar page.
 
-##### Grouping Toggle (By Car / By Instructor)
+##### Day Popout
 
-Controls how appointments and availability lanes are laid out horizontally within each day column.
+- **Double-click a day column header** (the date label at the top of any column) to open that day in a **popout detail view**.
+- The popout shows a single day in full width — the same time grid and appointment blocks as the main calendar, but expanded so individual blocks are easier to read and interact with.
+- The popout opens as a modal/overlay on top of the calendar; closing it (Esc or ×) returns to the normal week view with state preserved.
+- Zoom levels (px/hr) in the popout are independent of the main calendar zoom.
 
-- **By Car**: appointments are organized into vertical lanes, one lane per car. All appointments sharing the same car on the same day are in the same lane and have the same width. Lane widths are equal and sized so that all lanes fill the column without overlap.
-  - Appointments with **no car assigned** share a single "No Car" lane at the right of all car lanes. Within the No Car lane, each instructor gets an equal-width sub-lane — so 2 no-car instructors each get half the lane, 3 get a third, etc.
-  - If two appointments share a car but overlap in time, they are sub-divided within that lane.
-  - **Availability overlay**: intervals with a car clip to that car's lane; intervals with no car clip to their instructor's sub-lane within the No Car lane.
+##### Calendar Date Picker
 
-- **By Instructor**: same structure as By Car but lanes are per instructor.
-  - Appointments with **no instructor assigned** go in a "No Instructor" lane.
-  - Time overlaps within a lane are handled by sub-dividing that lane.
-  - **Availability overlay** clips each instructor's strip to exactly their own lane.
+- **Clicking any date chip in the week selector** (the "Feb 17 – Feb 23" style range label, or individual day chips if shown) opens an **inline calendar picker**.
+- The picker allows jumping to any arbitrary date — weeks or months in the past or future — without having to arrow through one week at a time.
+- Selecting a date in the picker closes it and scrolls the main calendar to the week containing that date.
+- The picker supports month/year navigation so jumping far forward or backward is fast.
 
-**Lane seeding from availability:** If a day has availability records but no appointments yet, lanes are pre-seeded from the availability data so the correct number of non-overlapping lanes are shown even before any appointments are added.
+##### Lane Layout (By Car)
+
+Appointments and availability lanes are laid out horizontally within each day column **by car** (fixed — no toggle).
+
+**Lane order (left to right) — only active lanes are shown:**
+1. Cars with availability or appointments on that day, sorted numerically by Car Name (Car 1 → Car N)
+2. Classrooms (Class Room 1, Class Room 2) — only included if there is at least one appointment using that classroom on that day
+3. Unassigned — only included if there are appointments with neither a car nor a classroom, or no-car availability instructor seeds; sub-divided by instructor
+
+A lane only takes space if it has something on that day. Empty lanes are omitted entirely, so all available width is shared among the lanes that are actually active. This means a day with only Car 1 and Car 3 booked will show two equal-width lanes — not five.
+
+- One vertical lane per active car/classroom. All appointments sharing the same car (or classroom) on the same day are in the same lane.
+- If two appointments in the same lane overlap in time, they are sub-divided within that lane.
+- **Availability overlay**: intervals with a car clip to that car's lane; intervals with no car clip to the instructor's sub-lane within the Unassigned lane.
 
 ##### Instructor Availability Overlay
 
 The calendar visually indicates when each instructor (and their paired car) is available to be scheduled.
 
-**Visual style:** Availability windows are rendered as a **translucent background wash** in the instructor's color, filling the background of the day column (or instructor lane in By Instructor grouping) for each available time block. The color is the same as the instructor's appointment block color but at much lower opacity (~10–15%) so it reads as a background hint, not a solid block. It should look clearly different from an appointment block — no border, no text, no click action.
+**Visual style:** Availability windows are rendered as a **translucent background wash** in the instructor's color, clipped to the car's lane. The strip shows the instructor's name and car name as small inline text (when tall enough). On hover, a tooltip shows:
+```
+{Instructor Name}
+{Car Name}
+{Start Time} – {End Time}
+```
 
 **What is shown:**
 - For each day visible in the calendar, the system expands each instructor's `Scheduled` availability records to determine which time windows they are working
@@ -210,18 +235,22 @@ The calendar visually indicates when each instructor (and their paired car) is a
    - If yes, subtract that time range from all matching `Scheduled` slots for the same instructor + vehicle on that day
 3. Render the resulting intervals as background overlays in the calendar
 
-**Grouping interaction:**
-- In **By Car** mode: availability intervals that have a car linked clip to that car's lane. Availability intervals with no car clip to the instructor's sub-lane within the shared "No Car" lane at the right.
-- In **By Instructor** mode: each instructor's availability wash is drawn only in their own lane, making the availability-vs-appointments relationship visually clear and precise.
+**Lane interaction:**
+- Availability intervals that have a car linked clip to that car's lane. Availability intervals with no car clip to the instructor's sub-lane within the shared "No Car" lane at the right.
 
 **Car pairing:** Each availability record links both an instructor and a vehicle. When a car is linked, the availability overlay also reflects which car is assigned during that window. This is surfaced in the tooltip on hover: `"Instructor Name — Car Name — 9:00 AM – 5:00 PM"`. No additional visual distinction is added for the car pairing beyond the tooltip.
 
 ##### Appointment Blocks
 
-- Color is determined by instructor (stable, from `INSTRUCTOR_ORDER`), regardless of grouping mode
-- **Click an empty time slot** → opens the create form with that time pre-filled (snapped to 60-min increments)
+- Color is determined by instructor (stable, from `INSTRUCTOR_ORDER`)
 - **Click an appointment block** → opens the edit form for that appointment
-- Appointments dynamically reflow when the grouping or zoom changes
+- **Click an empty time slot** → opens the **New Appointment** form (never the edit form) with fields pre-filled from context:
+  - **Date** — the calendar date of the column clicked
+  - **Start Time** — the clicked hour, snapped to the nearest whole hour
+  - **Instructor** — if an availability interval covers the clicked time in that column, the interval's instructor is pre-filled
+  - **Car** — if the covering availability interval has a linked vehicle, it is pre-filled (even though the Car field is hidden until a Course is selected — it is stored in form state and surfaces automatically when an In Car course is chosen)
+  - If multiple availability intervals overlap the clicked time (e.g. no-car sub-lanes), the first covering interval is used
+- Appointments dynamically reflow when the zoom changes
 
 ---
 
@@ -239,8 +268,12 @@ The calendar visually indicates when each instructor (and their paired car) is a
 
 The form is used for both creating and editing appointments. Fields appear and update dynamically based on which Course is selected.
 
-**Create mode:** Form opens with Student, Course, Instructor, Date, and Start Time empty (Start pre-filled if clicked from calendar). End Time is shown but calculated (read-only).
-**Edit mode:** All fields pre-filled from the existing record. Delete button appears in the modal header.
+**On the Calendar view (`/calendar`):** The form opens as a **sidebar** fixed to the right side of the screen, leaving the calendar fully visible and scrollable behind it. The sidebar has a fixed width and a close (×) button in its header. This lets users scroll through weeks to visually confirm availability without closing the form. When the user changes the **Date** field in the sidebar, the calendar automatically navigates to the week containing that date.
+
+**On the Table view (`/table`):** The form opens as a modal dialog (unchanged).
+
+**Create mode:** Form opens with Date defaulting to today and Start Time defaulting to 8:00 AM (both overridden if clicked from calendar, which pre-fills the clicked time). Student, Course, and Instructor start empty. End Time is shown but calculated (read-only).
+**Edit mode:** All fields pre-filled from the existing record. Delete button appears in the sidebar/modal header.
 
 #### Always-Visible Fields
 
@@ -249,7 +282,7 @@ These fields are always shown regardless of course selection:
 | Field | Input Type | Required | Notes |
 |-------|-----------|----------|-------|
 | Student | Dropdown (LinkedSelect) | **Yes** | Options from Students table |
-| Course | Dropdown (LinkedSelect) | **Yes** | Options from Courses table (filtered to active) |
+| Course | Dropdown (LinkedSelect) | **Yes** | Options from Courses table; label uses the **Lookup** field (the computed name Airtable surfaces via formula/lookup), not the raw name field |
 | Instructor | Dropdown (LinkedSelect) | **Yes** | Options from Instructors table |
 | Date | Date picker | **Yes** | Sets the appointment date |
 | Start Time | Time picker | **Yes** | Time of day the appointment begins |
@@ -259,25 +292,25 @@ These fields are always shown regardless of course selection:
 
 #### Conditionally Shown Fields
 
-These fields appear only when the selected Course's lookup values indicate they are applicable.
+**Car and Classroom are hidden until a Course is selected.** Once a course is selected, exactly one of Car or Classroom is shown based on the course's `Type`:
 
 | Field | Condition | Input Type | Options | Default |
 |-------|-----------|-----------|---------|---------|
-| Car | `Type (from Course)` = `"In Car"` | Dropdown (LinkedSelect) | Cars table | *(assumed In Car until Classroom course selected)* |
-| Classroom | `Type (from Course)` = `"Classroom"` | Select | `"Class Room 1"`, `"Class Room 2"` | — |
-| Age | `Age Options (from Course)` is non-empty | Select | Values from `Age Options (from Course)` lookup: `T`, `A` | — |
-| Tier | `Tier Options (from Course)` is non-empty | Select | `""` (none/blank), plus values from `Tier Options (from Course)` lookup: `EL`, `RL` | `""` (blank) |
-| Location | `Locations Options (from Course)` is non-empty | Select | Values from `Locations Options (from Course)` lookup: `CH`, `GA` | `CH` |
-| Spanish | `Spanish Offered (from Course)` = true | Checkbox | checked = Spanish session | unchecked |
-| PUDO | `PUDO Offered (from Course)` = true | Select | `""` (none), `0:30`, `1:00` | `""` (none) |
+| Car | Course selected **and** `Type` = `"In Car"` | Dropdown (LinkedSelect) — **Required** | Cars table | Auto-populated from instructor's availability window; required for In Car courses |
+| Classroom | Course selected **and** `Type` = `"Classroom"` | Select | `"Class Room 1"`, `"Class Room 2"` | `"Class Room 1"` |
+| Class # | `Numbered` = true on the selected Course | Number — auto-calculated | Integer | Auto-increments from student's most recent same-Course appointment |
+| Higher Tier | `Tier Options` is non-empty on the selected Course | Select | `""` (none/blank), plus values from `Tier Options`: `EL`, `RL` | `""` (blank) |
+| Location | `Location Options` is non-empty on the selected Course | Select | Values from `Location Options`: `CH`, `GA` | `CH` (Colonial Heights) |
+| Spanish | `Spanish Offered` = true on the selected Course | Checkbox | checked = Spanish session | unchecked |
+| PUDO | `PUDO Offered` = true on the selected Course | Select | `""` (none), `0:30`, `1:00` | `""` (none) |
 
-> **Type assumption:** If no course is selected, the form assumes "In Car" and shows the Car field. The Classroom field only appears if a Classroom-type course is explicitly chosen.
+> **No course selected:** Car and Classroom fields are hidden entirely. Once a course is chosen the correct field appears automatically.
 
-> **Options sourced from Airtable:** All conditional option lists (Age, Tier, Location) are read from the course's lookup fields on the selected record, not hardcoded. This means if Airtable's course options change, the form automatically reflects the new options.
+> **Options sourced from Airtable:** All conditional option lists (Tier, Location) are read from the course record's fields directly. This means if Airtable's course options change, the form automatically reflects the new options.
 
 #### Class Number Logic
 
-Class Number is auto-calculated, not entered manually:
+Class # is only shown when the selected Course has `Numbered = true`. When visible, it is auto-calculated:
 
 1. When a Student + Course combination is selected, query all existing appointments for that student + course
 2. Find the highest `Class Number` among those records
@@ -290,6 +323,8 @@ After filling in all form fields, the user chooses how to proceed:
 
 - **"Schedule One"** — creates a single appointment with the current form data (default behavior)
 - **"Bulk Schedule"** — creates multiple appointments from the same base form data
+
+**Button order in the form footer (left to right):** Cancel — Bulk Schedule — Create Appointment (or Save in edit mode). Bulk Schedule sits between the two primary actions so it is accessible but not the default path.
 
 **Bulk Schedule flow:**
 
@@ -355,10 +390,17 @@ This section will grow as new error types are identified. All validation runs cl
 
 ### Visual Treatment
 
-- The field(s) involved in a conflict glow red (destructive ring style)
-- An error message appears below the field explaining the specific conflict
-- In bulk scheduling, the tab/page indicator for any draft with an error is highlighted red
-- All errors must be resolved before the submit button becomes active
+**Hard errors (red)** — block submission entirely:
+- The field(s) involved glow red (destructive ring style)
+- An error message appears below the affected fields
+- The submit button is disabled until all hard errors are resolved
+- In bulk scheduling, the tab/page indicator for any draft with a hard error is highlighted red
+
+**Warnings (orange)** — allow submission after acknowledgement:
+- The field(s) involved glow orange (warning ring style)
+- A warning message appears below the affected fields
+- The scheduler can still submit despite warnings — they are informational only
+- In bulk scheduling, draft tabs with warnings are highlighted orange
 
 ### Error Types
 
@@ -400,6 +442,55 @@ This section will grow as new error types are identified. All validation runs cl
 **Exceptions / edge cases:**
 - Only applies when a Car is selected (In Car appointments)
 - Classroom appointments with no car selected are never flagged for car conflicts
+
+---
+
+#### W1 — Instructor Not Available at Proposed Time *(warning)*
+
+**Trigger:** The selected instructor has no `"Scheduled"` availability interval (after subtracting `"Blocked Off"` records) that covers the proposed appointment's full time range on the selected date.
+
+**Severity:** Warning only — does not block submission.
+
+**Fields highlighted (orange):** Instructor, Date, Start Time
+
+**Message:** `"[Instructor Name] has no availability window covering this time. Schedule anyway?"`
+
+**Behavior:**
+- Checked eagerly whenever Instructor, Date, or Start Time changes
+- Uses the same cached availability data (`useAvailability`) as the calendar overlay — no extra API call
+- Auto-population (see below) fires before this check; if a valid window is found the warning clears automatically
+
+---
+
+#### W2 — Car Not in Instructor's Availability Window *(warning)*
+
+**Trigger:** A car is selected that does not match the car linked to the instructor's availability window for the proposed time. Applies only to In Car appointments.
+
+**Severity:** Warning only — does not block submission.
+
+**Fields highlighted (orange):** Car
+
+**Message:** Up to two contextual lines, omitting any line where the data is not available:
+```
+[Instructor Name] is scheduled for [Their Car] at this time.
+[Selected Car] is scheduled for [Its Instructor] at this time.
+```
+- First line: shown only if the instructor has a covering window with a different car linked.
+- Second line: shown only if the selected car appears in another instructor's availability window at this time.
+- If neither line can be populated, falls back to: `"[Car Name] is not the car scheduled for [Instructor Name] at this time."`
+
+---
+
+#### Auto-population — Car from Instructor Availability
+
+When Instructor, Date, and Start Time are all set for an In Car course:
+1. Expand the instructor's availability records for the selected date
+2. Find the availability window that covers the proposed start time
+3. If that window has a linked vehicle **and** the Car field is currently empty, auto-fill the Car field with that vehicle
+4. If no matching window exists, leave Car unchanged and show W1 (instructor not available)
+5. If a window exists but has no car linked (e.g. office shift), leave Car unchanged
+
+Auto-population only fires when Car is empty. It does not overwrite a manually selected car (but W2 will warn if the selection doesn't match).
 
 ---
 
@@ -471,7 +562,7 @@ Every field that crosses the boundary between Airtable storage and the UI is tra
 |-------|----------------|-------------------|----------------|
 | Start | ISO 8601 string | separate Date + Time inputs | Split on read: `toDateInput()` / `toTimeInput()`; re-combined on write: `combineDateTime(date, time)` |
 | End | ISO 8601 string (formula) | `"10:30 AM"` read-only | `format(parseISO(iso), "h:mm a")` — never written |
-| PUDO | `""` / `"0:30"` / `"1:00"` string | Select dropdown | Stored and displayed as-is; no numeric conversion |
+| PUDO | `null` / `1800` / `3600` integer (seconds) | `""` / `"0:30"` / `"1:00"` select dropdown | `pudoFromSeconds()` on read; `pudoToSeconds()` on write |
 | Student / Instructor / Cars / Course | `["recXXX"]` array | Name string from lookup map | Array → first element → map lookup for display; wrapped back in `[recId]` on write |
 | Instructor color | Record ID | Hex color `#3b82f6` | `COLOR_MAP[id]` — display only |
 | Calendar position | Start ISO string | `top` in px | `(startHour - DAY_START_HOUR) × pxPerHour` — display only |
@@ -481,9 +572,10 @@ Every field that crosses the boundary between Airtable storage and the UI is tra
 
 ```
 1. User clicks empty time slot in calendar
-2. DayColumn calculates clicked time (snapped to 60-min)
-3. CalendarPage opens AppointmentModal in create mode, pre-filling Start date + time
-4. User fills in Student, Course, Instructor, Date, Start Time, and conditional fields
+2. DayColumn calculates clicked time (snapped to 60-min); checks availability intervals covering that time to extract instructorId and vehicleId
+3. CalendarPage opens AppointmentModal in create mode, passing a `prefill` object: { startDate, startTime, instructorId?, carId? }
+4. AppointmentForm reads prefill (not record) so isEdit = false; pre-populates Date, Start Time, Instructor, and Cars fields
+5. User fills in Student, Course, and any remaining fields
 5. AppointmentForm.onSubmit():
    - Combines Date + Time inputs into a single ISO string for Start
    - Wraps linked record IDs in arrays: [recId]
@@ -531,7 +623,7 @@ All field IDs are centralized in [app/src/utils/constants.js](../app/src/utils/c
 |---------------|--------------------|----|
 | `student` | Student | `fldSGS6xsegcdEklh` |
 | `instructor` | Instructor | `fldtQT4tfTJ5FCm9T` |
-| `cars` | Cars | `fldPRZoDW0yAe2YwQ` |
+| `car` | Car | `fldPRZoDW0yAe2YwQ` |
 | `course` | Course | `fldy84c9JSS2ris1w` |
 | `start` | Start | `fldSEIbrQiwpMhwB4` |
 | `pudo` | PUDO | `fld6nShioyE8NGlKH` |
