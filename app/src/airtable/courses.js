@@ -5,7 +5,7 @@ import { TABLES } from "@/utils/constants";
 export async function fetchAllCourses() {
   return fetchAll(TABLES.courses, {
     "fields[]": [
-      "Abreviation", "Name", "Lookup", "Length", "Type",
+      "Abreviation", "Name", "Length", "Type",
       "Tier Options", "Location Options",
       "Spanish Offered", "PUDO Offered", "Numbered",
     ],

@@ -1,3 +1,5 @@
+import { fullName } from "@/hooks/useReferenceData";
+
 /**
  * Conflict detection utilities for the appointment form.
  *
@@ -56,7 +58,7 @@ export function checkStudentConflict(allAppts, { startISO, endMs, studentId, ski
   );
   if (!conflicts.length) return null;
   const c = conflicts[0];
-  const instructorName = refData.instructorMap[c.fields.Instructor?.[0]]?.["Full Name"] ?? "?";
+  const instructorName = fullName(refData.instructorMap[c.fields.Instructor?.[0]]);
   const start = c.fields.Start ? new Date(c.fields.Start).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "?";
   const end   = c.fields.End   ? new Date(c.fields.End).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "?";
   return {
@@ -77,7 +79,7 @@ export function checkInstructorConflict(allAppts, { startISO, endMs, instructorI
   );
   if (!conflicts.length) return null;
   const c = conflicts[0];
-  const studentName = refData.studentMap[c.fields.Student?.[0]]?.["Full Name"] ?? "?";
+  const studentName = fullName(refData.studentMap[c.fields.Student?.[0]]);
   const start = c.fields.Start ? new Date(c.fields.Start).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "?";
   const end   = c.fields.End   ? new Date(c.fields.End).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "?";
   return {
@@ -98,8 +100,8 @@ export function checkCarConflict(allAppts, { startISO, endMs, carId, skipId, ref
   );
   if (!conflicts.length) return null;
   const c = conflicts[0];
-  const instructorName = refData.instructorMap[c.fields.Instructor?.[0]]?.["Full Name"] ?? "?";
-  const studentName    = refData.studentMap[c.fields.Student?.[0]]?.["Full Name"] ?? "?";
+  const instructorName = fullName(refData.instructorMap[c.fields.Instructor?.[0]]);
+  const studentName    = fullName(refData.studentMap[c.fields.Student?.[0]]);
   const start = c.fields.Start ? new Date(c.fields.Start).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "?";
   const end   = c.fields.End   ? new Date(c.fields.End).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "?";
   return {
@@ -136,7 +138,7 @@ export function checkAvailabilityWarnings(availIntervals, { startISO, endMs, ins
   );
 
   if (!coveringWindow) {
-    const instructorName = refData.instructorMap[instructorId]?.["Full Name"] ?? "This instructor";
+    const instructorName = fullName(refData.instructorMap[instructorId]);
     return [{
       type: "W1",
       severity: "warning",
@@ -148,7 +150,7 @@ export function checkAvailabilityWarnings(availIntervals, { startISO, endMs, ins
   // W2 — car selected doesn't match the car in the covering window
   const warnings = [];
   if (carId && coveringWindow.vehicleId && carId !== coveringWindow.vehicleId) {
-    const instructorName = refData.instructorMap[instructorId]?.["Full Name"] ?? null;
+    const instructorName = fullName(refData.instructorMap[instructorId]) || null;
     const selectedCarName = refData.vehicleMap[carId]?.["Car Name"] ?? null;
 
     // Line 1: what car is the instructor actually scheduled with?
@@ -163,7 +165,7 @@ export function checkAvailabilityWarnings(availIntervals, { startISO, endMs, ins
         && w.startMs <= propStart && w.endMs >= endMs
     );
     const carOwnerName = carOwnerWindow
-      ? (refData.instructorMap[carOwnerWindow.instructorId]?.["Full Name"] ?? null)
+      ? (fullName(refData.instructorMap[carOwnerWindow.instructorId]) || null)
       : null;
     const line2 = selectedCarName && carOwnerName
       ? `${selectedCarName} is scheduled for ${carOwnerName} at this time.`
@@ -183,7 +185,7 @@ export function checkAvailabilityWarnings(availIntervals, { startISO, endMs, ins
 
   // W3 — instructor's covering window is at a different location than selected
   if (location && coveringWindow.location && location !== coveringWindow.location) {
-    const instructorName = refData.instructorMap[instructorId]?.["Full Name"] ?? "This instructor";
+    const instructorName = fullName(refData.instructorMap[instructorId]);
     warnings.push({
       type: "W3",
       severity: "warning",
@@ -262,7 +264,7 @@ export function checkLocationTravelWarning(allAppts, { startISO, endMs, instruct
     // Existing appointment ends too close before proposed start
     if (aEnd <= propStart && propStart - aEnd < TRAVEL_BUFFER_MS) {
       const time = new Date(aEnd).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-      const instructorName = refData.instructorMap[instructorId]?.["Full Name"] ?? "This instructor";
+      const instructorName = fullName(refData.instructorMap[instructorId]);
       return {
         type: "W4",
         severity: "warning",
@@ -274,7 +276,7 @@ export function checkLocationTravelWarning(allAppts, { startISO, endMs, instruct
     // Existing appointment starts too close after proposed end
     if (aStart >= endMs && aStart - endMs < TRAVEL_BUFFER_MS) {
       const time = new Date(aStart).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-      const instructorName = refData.instructorMap[instructorId]?.["Full Name"] ?? "This instructor";
+      const instructorName = fullName(refData.instructorMap[instructorId]);
       return {
         type: "W4",
         severity: "warning",
@@ -285,6 +287,53 @@ export function checkLocationTravelWarning(allAppts, { startISO, endMs, instruct
   }
 
   return null;
+}
+
+/**
+ * W5/W6 — Instructor capability warnings from Instructors table fields.
+ *
+ * W5: Spanish requested but instructor is not marked Spanish-capable.
+ * W6: Tier selected but instructor's Tiers does not include selected tier.
+ *
+ * Returns an array of warning objects.
+ */
+export function checkInstructorCapabilityWarnings({ instructorId, spanish, tier }, refData) {
+  if (!instructorId) return [];
+
+  const instructor = refData.instructorMap[instructorId] ?? {};
+  const instructorName = fullName(instructor);
+  const warnings = [];
+
+  // W5 — Spanish capability
+  const spanishCapable = instructor.Spanish === true;
+  if (spanish && !spanishCapable) {
+    warnings.push({
+      type: "W5",
+      severity: "warning",
+      fields: ["Instructor"],
+      message: `${instructorName} cannot teach Spanish sessions`,
+    });
+  }
+
+  // W6 — Tier capability
+  if (tier) {
+    const instructorTiersRaw = instructor.Tiers;
+    const instructorTiers = Array.isArray(instructorTiersRaw)
+      ? instructorTiersRaw
+      : instructorTiersRaw
+      ? [instructorTiersRaw]
+      : [];
+    if (!instructorTiers.includes(tier)) {
+      warnings.push({
+        type: "W6",
+        severity: "warning",
+        fields: ["Instructor"],
+        message: `${instructorName} cannot teach ${tier} sessions`,
+      });
+    }
+  }
+
+  return warnings;
 }
 
 /**

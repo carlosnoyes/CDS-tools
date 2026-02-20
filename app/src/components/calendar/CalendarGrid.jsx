@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from "react";
 import { isToday, eachWeekOfInterval, startOfYear, endOfYear, addDays } from "date-fns";
-import { formatDayHeader, weekDays, toISODate, getMondayOf } from "@/utils/time";
+import { formatDayHeader, weekDays, toISODate, getMondayOf, HOUR_LABELS } from "@/utils/time";
 import { expandAvailability } from "@/utils/availability";
 import TimeGutter from "./TimeGutter";
 import DayColumn from "./DayColumn";
@@ -43,23 +43,21 @@ export default function CalendarGrid({
   onAnchorChange,
   onEdit,
   onCreateAt,
-  onVerticalZoom,
+  onVerticalResize,
   onHorizontalZoom,
   onGutterResize,
   onColResize,
   onPopoutDay,
 }) {
   const scrollRef = useRef(null);
-  const weekRefs = useRef({});       // monday ISO → DOM element
-  const anchorRef = useRef(anchor);  // track anchor without triggering re-render
-  const scrollingToAnchor = useRef(false); // suppress observer during programmatic scroll
+  const weekRefs = useRef({});
+  const anchorRef = useRef(anchor);
+  const scrollingToAnchor = useRef(false);
 
   const weeks = getAllWeeks(anchor);
-
-  // Keep anchorRef in sync
   anchorRef.current = anchor;
 
-  // ── Scroll to target week — only fires when a nav button sets scrollTarget ──
+  // Scroll to target week when nav sets scrollTarget
   const prevSeqRef = useRef(-1);
   useEffect(() => {
     if (!scrollTarget) return;
@@ -72,12 +70,13 @@ export default function CalendarGrid({
 
     scrollingToAnchor.current = true;
     el.scrollIntoView({ block: "start", behavior: isFirstMount ? "instant" : "smooth" });
-    setTimeout(() => { scrollingToAnchor.current = false; }, 600);
-  // Run when scrollTarget.seq changes (seq increments on every nav-button press)
+    setTimeout(() => {
+      scrollingToAnchor.current = false;
+    }, 600);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scrollTarget?.seq]);
 
-  // ── IntersectionObserver: update anchor label as user scrolls ──
+  // Update nav anchor while user scrolls
   useEffect(() => {
     const container = scrollRef.current;
     if (!container) return;
@@ -85,7 +84,6 @@ export default function CalendarGrid({
     const observer = new IntersectionObserver(
       (entries) => {
         if (scrollingToAnchor.current) return;
-        // Pick the topmost week row that is intersecting near the top of the viewport
         let best = null;
         for (const entry of entries) {
           if (!entry.isIntersecting) continue;
@@ -97,7 +95,6 @@ export default function CalendarGrid({
           const mondayISO = best.target.dataset.monday;
           if (mondayISO) {
             const monday = new Date(mondayISO);
-            // Only call if it actually changed
             if (monday.toISOString() !== getMondayOf(anchorRef.current).toISOString()) {
               onAnchorChange(monday);
             }
@@ -112,11 +109,10 @@ export default function CalendarGrid({
     });
 
     return () => observer.disconnect();
-  // Re-run when the week list changes (new year loaded)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [weeks.length]);
 
-  // ── Zoom mode: block container scroll so wheel only zooms ──
+  // Horizontal zoom mode blocks wheel scroll to make wheel exclusively resize columns.
   useEffect(() => {
     const container = scrollRef.current;
     if (!container || !zoomMode) return;
@@ -128,62 +124,83 @@ export default function CalendarGrid({
     return () => container.removeEventListener("wheel", blockScroll);
   }, [zoomMode]);
 
-  // ── Keyboard Escape exits zoom ──
   useEffect(() => {
     if (!zoomMode) return;
-    function onKey(e) { if (e.key === "Escape") onExitZoom(); }
+    function onKey(e) {
+      if (e.key === "Escape") onExitZoom();
+    }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [zoomMode, onExitZoom]);
 
-  // ── Drag-to-resize: gutter ──
-  const startDragGutter = useCallback((e) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startWidth = gutterWidth;
-    function onMove(mv) {
-      onGutterResize(startWidth + (mv.clientX - startX));
-    }
-    function onUp() {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    }
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  }, [gutterWidth, onGutterResize]);
+  // Drag-to-resize: gutter width
+  const startDragGutter = useCallback(
+    (e) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startWidth = gutterWidth;
+      function onMove(mv) {
+        onGutterResize(startWidth + (mv.clientX - startX));
+      }
+      function onUp() {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      }
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [gutterWidth, onGutterResize]
+  );
 
-  // ── Drag-to-resize: column ──
-  const startDragCol = useCallback((e) => {
+  // Drag-to-resize: column width
+  const startDragCol = useCallback(
+    (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const startX = e.clientX;
+      const startWidth = dayColWidth;
+      function onMove(mv) {
+        onColResize(startWidth + (mv.clientX - startX));
+      }
+      function onUp() {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      }
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [dayColWidth, onColResize]
+  );
+
+  // Drag-to-resize: vertical scale using end-of-day line.
+  const dayHourCount = HOUR_LABELS.length;
+  const startDragVertical = useCallback(
+    (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const startY = e.clientY;
+      const startPx = pxPerHour;
+      function onMove(mv) {
+        const deltaY = mv.clientY - startY;
+        const nextPx = startPx + deltaY / dayHourCount;
+        onVerticalResize(nextPx);
+      }
+      function onUp() {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      }
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [pxPerHour, dayHourCount, onVerticalResize]
+  );
+
+  function handleHeaderDoubleClick(e) {
     e.preventDefault();
     e.stopPropagation();
-    const startX = e.clientX;
-    const startWidth = dayColWidth;
-    function onMove(mv) {
-      onColResize(startWidth + (mv.clientX - startX));
-    }
-    function onUp() {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    }
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  }, [dayColWidth, onColResize]);
-
-  function handleGutterDoubleClick(e) {
-    e.preventDefault(); e.stopPropagation();
-    onSetZoomMode(zoomMode === "vertical" ? null : "vertical");
-  }
-  function handleHeaderDoubleClick(e) {
-    e.preventDefault(); e.stopPropagation();
     onSetZoomMode(zoomMode === "horizontal" ? null : "horizontal");
   }
-  function handleGutterWheel(e) {
-    if (zoomMode !== "vertical") return;
-    e.preventDefault();
-    e.stopPropagation();
-    e.nativeEvent.stopImmediatePropagation();
-    onVerticalZoom(e.deltaY > 0 ? 1 : -1);
-  }
+
   function handleHeaderWheel(e) {
     if (zoomMode !== "horizontal") return;
     e.preventDefault();
@@ -191,28 +208,16 @@ export default function CalendarGrid({
     e.nativeEvent.stopImmediatePropagation();
     onHorizontalZoom(e.deltaY > 0 ? 1 : -1);
   }
+
   function handleGridClick() {
     if (zoomMode) onExitZoom();
   }
 
-  const gutterBase = zoomMode === "vertical"
-    ? "shrink-0 border-r border-border bg-background ring-2 ring-inset ring-primary cursor-ns-resize"
-    : "shrink-0 border-r border-border bg-background cursor-ns-resize";
-
   const headerZoneClass = zoomMode === "horizontal" ? "ring-2 ring-inset ring-primary" : "";
-
-  // Total content width — used to size the inner container so the outer
-  // scroll container can scroll both axes independently.
   const totalContentWidth = gutterWidth + 7 * dayColWidth;
 
   return (
-    // Outer: single scroll container for both axes
-    <div
-      ref={scrollRef}
-      className="overflow-auto h-full"
-      onClick={handleGridClick}
-    >
-      {/* Inner: sized to full content width so horizontal scroll works */}
+    <div ref={scrollRef} className="overflow-auto h-full" onClick={handleGridClick}>
       <div style={{ minWidth: totalContentWidth }}>
         {weeks.map((monday) => {
           const weekDaysArr = weekDays(monday);
@@ -221,24 +226,23 @@ export default function CalendarGrid({
           return (
             <div
               key={mondayKey}
-              ref={(el) => { weekRefs.current[mondayKey] = el; }}
+              ref={(el) => {
+                weekRefs.current[mondayKey] = el;
+              }}
               data-monday={mondayKey}
               className="border-b border-border"
             >
-              {/* Day header row — sticky top, double-click background for horizontal zoom */}
               <div
                 className={`flex border-b bg-background sticky top-0 z-10 ${headerZoneClass}`}
                 onDoubleClick={handleHeaderDoubleClick}
                 onWheel={handleHeaderWheel}
-                title={zoomMode === "horizontal"
-                  ? "Scroll to resize columns · Esc or click to lock"
-                  : "Double-click background to resize columns"}
+                title={
+                  zoomMode === "horizontal"
+                    ? "Scroll to resize columns | Esc or click to lock"
+                    : "Double-click background to resize columns"
+                }
               >
-                {/* Gutter spacer — sticky left so it stays visible on horizontal scroll */}
-                <div
-                  className="relative shrink-0 bg-background sticky left-0 z-20"
-                  style={{ width: gutterWidth }}
-                >
+                <div className="relative shrink-0 bg-background sticky left-0 z-20" style={{ width: gutterWidth }}>
                   <div
                     className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-primary/30 z-20"
                     onMouseDown={startDragGutter}
@@ -246,13 +250,13 @@ export default function CalendarGrid({
                     title="Drag to resize time gutter"
                   />
                 </div>
+
                 {weekDaysArr.map((day) => (
                   <div
                     key={day.toISOString()}
                     style={{ width: dayColWidth, flexShrink: 0 }}
                     className="relative border-l border-border"
                   >
-                    {/* Day label — double-click opens day popout */}
                     <div
                       className={`text-center py-1.5 text-xs font-medium ${
                         isToday(day) ? "text-primary font-bold" : "text-muted-foreground"
@@ -269,7 +273,6 @@ export default function CalendarGrid({
                         <span className="ml-1 text-[9px] text-primary opacity-70">{dayColWidth}px</span>
                       )}
                     </div>
-                    {/* Column drag handle on right edge */}
                     <div
                       className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-primary/30 z-20"
                       onMouseDown={startDragCol}
@@ -278,40 +281,25 @@ export default function CalendarGrid({
                     />
                   </div>
                 ))}
+
                 {zoomMode === "horizontal" && (
                   <div className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] text-primary font-medium pointer-events-none">
-                    scroll to resize · esc to lock
+                    scroll to resize | esc to lock
                   </div>
                 )}
               </div>
 
-              {/* Time grid */}
-              <div className="flex">
-                {/* Time gutter — sticky left so it stays visible on horizontal scroll */}
-                <div
-                  className={`${gutterBase} relative sticky left-0 z-10`}
-                  style={{ width: gutterWidth }}
-                  onDoubleClick={handleGutterDoubleClick}
-                  onWheel={handleGutterWheel}
-                  title={zoomMode === "vertical"
-                    ? "Scroll to resize rows · Esc or click to lock"
-                    : "Double-click to resize rows"}
-                >
+              <div className="relative flex">
+                <div className="shrink-0 border-r border-border bg-background relative sticky left-0 z-10" style={{ width: gutterWidth }} title="Time axis">
                   <TimeGutter pxPerHour={pxPerHour} />
-                  {zoomMode === "vertical" && (
-                    <div className="absolute bottom-1 left-0 right-0 text-center text-[8px] text-primary pointer-events-none">
-                      scroll · esc
-                    </div>
-                  )}
-                  {/* Gutter drag handle on right edge */}
                   <div
                     className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-primary/30 z-20"
                     onMouseDown={startDragGutter}
                     onDoubleClick={(e) => e.stopPropagation()}
+                    title="Drag to resize time gutter"
                   />
                 </div>
 
-                {/* Day columns */}
                 {weekDaysArr.map((day) => (
                   <div key={day.toISOString()} style={{ width: dayColWidth, flexShrink: 0 }}>
                     <DayColumn
@@ -325,6 +313,12 @@ export default function CalendarGrid({
                     />
                   </div>
                 ))}
+
+                <div
+                  className="absolute left-0 right-0 bottom-0 h-1.5 cursor-row-resize hover:bg-primary/40 z-30"
+                  onMouseDown={startDragVertical}
+                  title="Drag end-of-day line to resize vertical scale"
+                />
               </div>
             </div>
           );

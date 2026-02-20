@@ -264,6 +264,129 @@ CDS needs a web UI to view and manage driving appointments stored in Airtable. T
 - [x] Add **W4** to `conflicts.js`: instructor has another appointment on the same day at a different location within 30 min travel buffer — orange warning, does not block submit
 - [x] Wire W3/W4 into `AppointmentForm` — same pattern as W1/W2: run checks eagerly on Instructor, Date, Start Time, Location changes; surface warnings in the form
 
+### Phase 20 — Scoped Block Off Overrides (Instructor-Only / Car-Only)
+
+- [ ] Update `expandAvailability()` in `app/src/utils/availability.js` to support `Blocked Off` scope matching rules:
+- [ ] If Blocked Off has both `Instructor` and `Vehicle`: subtract only matching instructor+vehicle intervals
+- [ ] If Blocked Off has only `Instructor`: subtract from all scheduled intervals for that instructor (any vehicle)
+- [ ] If Blocked Off has only `Vehicle`: subtract from all scheduled intervals for that vehicle (any instructor)
+- [ ] If Blocked Off has neither `Instructor` nor `Vehicle`: treat as invalid/no-op (ignore)
+- [ ] Preserve current recurrence behavior (`Weekly` / `Bi-Weekly`) and blocked-interval subtraction splitting logic
+- [ ] Ensure resulting intervals still carry `location` and lane metadata inputs unchanged for downstream renderers
+- [ ] Update availability overlay behavior in `DayColumn` / `AvailabilityOverlay` validation pass to confirm scoped block-offs remove visual windows as expected
+- [ ] Update W1/W2/W3 warning computation assumptions in `app/src/utils/conflicts.js` to align with scoped block-off results from `expandAvailability()`
+- [ ] Add targeted unit tests for `expandAvailability()` covering:
+- [ ] Pair-specific block (Instructor+Vehicle)
+- [ ] Instructor-only block across multiple vehicles
+- [ ] Vehicle-only block across multiple instructors
+- [ ] Partial overlap split and full overlap removal
+- [ ] Bi-weekly recurrence with scoped block
+- [ ] Invalid block with both links blank (ignored)
+- [ ] Add a short QA checklist for manual verification in calendar UI:
+- [ ] Create instructor-only block and verify all that instructor’s lanes are removed for the blocked time
+- [ ] Create vehicle-only block and verify that car lane is blocked regardless of instructor
+- [ ] Verify appointment form W1 warning appears when scoped block removes covering window
+- [ ] Verify no regression for existing pair-specific block behavior
+
+### Phase 21 — Appointment Block Content + Tooltip Metadata
+
+- [x] Update `app/src/components/calendar/AppointmentBlock.jsx` to render compact block text:
+- [x] Optional meta line: `GA` and/or `PUDO30`/`PUDO60` (omit line if neither)
+- [x] Instructor line: full name
+- [x] Student line: full name
+- [x] Course token line: `Tier-CourseAbbreviationClassNumber` (for example `EL-BTW2`), omit missing pieces
+- [x] Remove course name from visible block text (token-only display)
+- [x] Expand appointment hover `title` metadata to include:
+- [x] `Time`, `Location`, optional `PUDO`, `Instructor`, `Student`, `Car/Classroom`, `Course: ABR - Name`, optional `Class Number`, optional `Tier`, optional `Spanish: True`, optional `Notes`
+- [x] Resolve course abbreviation/name from `refData.courseMap` (fallback-safe), and car display from `Car` link or `Classroom` value
+- [x] Verify block text still truncates safely and remains readable at small block heights
+- [ ] Manual QA: confirm tooltip lines/ordering and conditional omission logic on records with/without GA, PUDO, Tier, Class Number, Spanish, Notes
+
+### Phase 22 — Vertical Zoom via End-of-Day Drag Handle
+
+- [x] Replace vertical zoom interaction from "double-click gutter + wheel" to "drag end-of-day line"
+- [x] Add a horizontal drag handle at the bottom boundary of each week grid (end-of-day line)
+- [x] Dragging handle down increases vertical scale (`pxPerHour`); dragging up decreases it
+- [x] Keep existing vertical min/max bounds (`20..600 px/hr`)
+- [x] Remove vertical zoom mode UI state and related gutter double-click/wheel handlers
+- [x] Keep horizontal zoom behavior unchanged (double-click header + wheel and column drag)
+- [ ] Add manual QA pass: verify resize works smoothly and no scroll-lock regressions
+
+### Phase 23 — Chronological Class Number Sequencing
+
+- [x] Single scheduling class number should use the most recent prior non-canceled/non-no-show match before the proposed `Start` (not global max)
+- [x] Update base form auto-calc dependencies to include proposed Date/Start so class # recalculates relative to scheduled date/time
+- [x] Edit flow: detect chronology-impacting changes (Student, Course, Start, Class #) and compute future sequence reindex updates
+- [x] Edit flow: show warning/confirmation preview of impacted appointments with class-number changes (`old -> new`) before save
+- [x] Edit flow: apply additional PATCH updates to impacted future appointments after primary save, keeping numbering chronological
+- [x] Bulk flow: maintain drafts in chronological order based on current draft Start values (not static index order)
+- [x] Bulk flow: recalculate draft labels/order and class numbers whenever draft Start changes
+- [x] Bulk flow: class numbering for each draft follows the same prior-match rule against existing appointments + earlier chronological drafts
+- [x] Verify no class numbering is derived from canceled/no-show records
+
+### Phase 24 — Instructor Capability Warnings (Spanish/Tier)
+
+- [x] Add W5 warning when `Spanish = true` and selected instructor is not marked Spanish-capable in Instructors table
+- [x] Add W6 warning when appointment `Tier` is set and selected instructor `Tiers` does not include that tier
+- [x] Update Airtable instructor fetch to include `Spanish` and `Tiers` fields
+- [x] Wire capability warnings into single-form warning pipeline in `AppointmentForm`
+- [x] Wire capability warnings into bulk draft warning pipeline in `AppointmentForm`
+- [x] Ensure warnings are non-blocking and shown with existing orange warning treatment
+
+### Phase 25 — Additional Classes (Edit Mode Bulk)
+
+- [x] Add "Additional Classes" button to the edit form footer (edit mode only, sits between Cancel and Save Changes)
+- [x] Add `additionalClassesMode` state to `AppointmentForm`; toggling it shows/hides the additional classes panel below the form
+- [x] In additional classes mode, show a read-only list of all existing non-canceled/non-no-show appointments for the same student+course (sorted chronologically): date, time, instructor name, class # — informational only
+- [x] Add a draft count input + draft tabs below the existing list, same UX as Bulk Schedule
+- [x] Drafts default to starting from the current appointment's date (+1 week per slot)
+- [x] Per-draft override model identical to Bulk Schedule (BulkDraftPanel reused)
+- [x] Conflict and warning checks run per-draft, same as Bulk Schedule
+- [x] Submitting additional drafts creates only those new appointments; existing appointments are untouched
+- [x] "Additional Classes" panel can be dismissed without creating; returns sidebar to normal edit mode
+- [x] Submitting additional classes does not close the edit sidebar — user may still save base record edits separately
+
+---
+
+### Phase 26 — Students View
+
+- [x] Add `AppShell` nav tab for **Students** (`/students`)
+- [x] Create `app/src/pages/StudentsPage.jsx` — full-width students table + sidebar container
+- [x] Add route `/students` in `App.jsx`
+- [x] Students table columns: Full Name, Phone, Email, Teen (badge), Address
+- [x] Client-side search/filter bar — filters rows by name, phone, or email as user types
+- [x] "+ New Student" button in top-right opens sidebar in create mode
+- [x] Clicking any student row opens sidebar in edit mode pre-filled with that student's record
+- [x] Create `app/src/components/students/StudentForm.jsx` — sidebar form for create and edit
+  - [x] **Student Info** fields: First Name (required), Last Name (required), Phone, Email, Address, Teen (checkbox)
+  - [x] **Guardian Info** fields: Guardian First Name, Guardian Last Name, Guardian Relation, Guardian Phone, Guardian Email
+  - [x] Create mode header: "New Student"; edit mode header: student's full name
+  - [x] Delete button in edit mode header — shows confirmation before DELETE
+  - [x] Close (×) button; Full Name, Appointments, Record ID, Created, Last Modified are read-only and not shown in form
+- [x] Add `createStudent`, `updateStudent`, `deleteStudent` to `app/src/airtable/students.js`
+- [x] On create/update/delete: invalidate students cache so table refreshes immediately
+- [x] Add student field IDs to `constants.js` (`STUDENT_FIELDS` map)
+- [x] Sidebar uses same layout pattern as appointment form sidebar (fixed right, calendar remains scrollable behind it)
+
+### Phase 27 — Availability View
+
+- [x] Add `createAvailability`, `updateAvailability`, `deleteAvailability` to `app/src/airtable/availability.js`
+- [x] Create `app/src/hooks/useAvailabilityMutations.js` — CRUD mutation hooks with cache invalidation
+- [x] Add `AppShell` nav tab for **Availability** (`/availability`) with `CalendarClock` icon
+- [x] Add route `/availability` in `App.jsx`
+- [x] Create `app/src/utils/availabilityView.js` — `buildRecurringBlocks()` and `buildWeekBlocks()` data transforms
+- [x] Create `app/src/components/availability/AvailabilityToolbar.jsx` — mode toggle (Recurring/Week View), day-of-week selector, week nav, shortcut buttons
+- [x] Create `app/src/components/availability/AvailabilityGrid.jsx` — time grid container with resource lane columns
+- [x] Create `app/src/components/availability/ResourceColumn.jsx` — single resource lane with hour grid lines and blocks
+- [x] Create `app/src/components/availability/AvailabilityBlock.jsx` — positioned block with drag-to-resize (top/bottom edges), 15-min snap
+- [x] Create `app/src/components/availability/AvailabilitySidebar.jsx` — sidebar shell following AppointmentSidebar pattern
+- [x] Create `app/src/components/availability/AvailabilityForm.jsx` — React Hook Form: Status, Instructor, Vehicle, Location, Day/Date, Start Time, Shift Length, Cadence, Repeate Until
+- [x] Create `app/src/components/availability/BlockShortcutDialog.jsx` — bulk Block Instructor (vacation) and Block Car (out of service)
+- [x] Create `app/src/pages/AvailabilityPage.jsx` — page component with mode state, sidebar, grid, shortcuts
+- [x] Recurring mode: resource lanes (Car 1..N, Unassigned), day-of-week filter, blocks from Scheduled records
+- [x] Week View mode: expanded availability after block subtraction, 7 day sub-columns per lane, Blocked Off overlays (striped)
+- [x] Click block → edit sidebar; Click empty → create sidebar; Drag edges → resize + auto-save
+
 ## Constraints
 
 - Airtable API key goes in `app/.env` as `VITE_AIRTABLE_API_KEY` (Vite prefix required for browser exposure)

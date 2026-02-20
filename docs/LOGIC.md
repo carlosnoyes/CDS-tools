@@ -6,15 +6,15 @@
 
 ## Overview
 
-The scheduler is a React/Vite web app that reads and writes appointment records in Airtable's **Schedule** table. Users can view appointments in a **year-scroll calendar** or a **sortable table view**, and create/edit/delete appointments via a modal form.
+The scheduler is a React/Vite web app that reads and writes records in Airtable. Users can view appointments in a **year-scroll calendar** or a **sortable table view**, manage students in a **Students view**, and create/edit/delete records via sidebar or modal forms.
 
 There is no backend server. The browser talks directly to the Airtable REST API using a Bearer token. Airtable is the single source of truth for all data.
 
 ```
-┌─────────────────────────────────┐
-│         Browser (React)         │
-│  Calendar · Table · Form        │
-└──────────────┬──────────────────┘
+┌─────────────────────────────────────────────┐
+│              Browser (React)                │
+│  Calendar · Table · Students · Availability │
+└──────────────┬──────────────────────────────┘
                │ HTTPS (Airtable REST API)
                │ Bearer token auth
 ┌──────────────▼──────────────────┐
@@ -219,7 +219,7 @@ The calendar visually indicates when each instructor (and their paired car) is a
 
 **What is shown:**
 - For each day visible in the calendar, the system expands each instructor's `Scheduled` availability records to determine which time windows they are working
-- Any `Blocked Off` records that fall on that day are subtracted — those time ranges are not highlighted even if they fall within a `Scheduled` window
+- Any `Blocked Off` records that fall on that day are subtracted using scoped override rules (instructor-only, vehicle-only, or instructor+vehicle)
 - The result is a set of `{ instructorId, vehicleId, start, end }` intervals per day that represent actual available (unblocked) windows
 
 **Data source:** Availability table (`tbl5db09IrQR5rmgU`). Fetched alongside appointments, cached 2 minutes (availability changes infrequently but should reflect recent edits within a short session).
@@ -232,8 +232,16 @@ The calendar visually indicates when each instructor (and their paired car) is a
    - If yes, add `{ instructorId, vehicleId, location, shiftStart, shiftEnd }` to the available slots for that day
 2. For each availability record with `Status = "Blocked Off"`:
    - Same recurrence check
-   - If yes, subtract that time range from all matching `Scheduled` slots for the same instructor + vehicle on that day
+   - If yes, subtract that time range from matching `Scheduled` slots using block scope:
+     - If **Instructor and Vehicle are both set**: block only that instructor+vehicle pairing
+     - If **Instructor is set and Vehicle is blank**: block that instructor across all vehicles
+     - If **Vehicle is set and Instructor is blank**: block that vehicle across all instructors
+     - If **both are blank**: invalid/no-op (ignored by scheduler)
 3. Render the resulting intervals as background overlays in the calendar
+
+**Blocked Off precedence (important):**
+- `Blocked Off` is an override layer and always wins over `Scheduled` availability for any overlapping time range in its scope.
+- This allows creating general exceptions without specifying both links (for example, car-only downtime or instructor-only PTO).
 
 **Lane interaction:**
 - Availability intervals that have a car linked clip to that car's lane. Availability intervals with no car clip to the instructor's sub-lane within the shared "No Car" lane at the right.
@@ -243,6 +251,28 @@ The calendar visually indicates when each instructor (and their paired car) is a
 ##### Appointment Blocks
 
 - Color is determined by instructor (stable, from `INSTRUCTOR_ORDER`)
+- Block text uses a compact 4-line layout:
+  - Line 1 (optional meta): `GA` (only when Location = `GA`) and `PUDO30`/`PUDO60` (only when PUDO exists). If neither exists, omit the entire line.
+  - Line 2: Instructor full name
+  - Line 3: Student full name
+  - Line 4 (course token): `Tier-CourseAbbreviationClassNumber` (no spaces), omitting missing parts:
+    - Example with tier and class number: `EL-BTW2`
+    - Example with tier, no class number: `EL-BTW`
+    - Example with no tier, class number present: `BTW2`
+    - Example with neither tier nor class number: `BTW`
+  - Course **Name** is omitted from block text (abbreviation/token only).
+- Appointment block hover metadata (tooltip) shows:
+  - `Time: [Start – End]`
+  - `Location: [Location]`
+  - `PUDO: [30|60] min` (only when PUDO exists)
+  - `Instructor: [Instructor Name]`
+  - `Student: [Student Name]`
+  - `Car/Classroom: [Car Name or Class Room N]`
+  - `Course: [ABR - Name]`
+  - `Class Number: [#]` (only when class number exists)
+  - `Tier: [EL|RL]` (only when tier exists)
+  - `Spanish: True` (only when Spanish is checked)
+  - `Notes: [text]` (only when Notes is non-empty)
 - **Click an appointment block** → opens the edit form for that appointment
 - **Click an empty time slot** → opens the **New Appointment** form (never the edit form) with fields pre-filled from context:
   - **Date** — the calendar date of the column clicked
@@ -264,6 +294,132 @@ The calendar visually indicates when each instructor (and their paired car) is a
 - Columns: Start, End, Student, Instructor, Vehicle, Course, #, PUDO, Location, Notes
 - Click any column header to sort ascending/descending
 - Click the pencil icon on any row to edit that appointment
+
+---
+
+#### Students View (`/students`)
+
+The Students view provides direct access to the Students table in Airtable. Users can browse, search, create, and edit student records without leaving the scheduling tool.
+
+##### Layout
+
+- A full-width table lists all students, one row per record
+- Columns: Full Name, Phone, Email, Teen (badge), Address
+- A **search/filter bar** at the top filters rows client-side by name, phone, or email as the user types
+- A **"+ New Student"** button in the top-right opens the student form in a side panel
+
+##### Student Form (Sidebar)
+
+The form opens as a **sidebar** fixed to the right side of the screen — same UX pattern as the appointment form on the calendar. It is used for both creating and editing students.
+
+**Create mode:** Opens with all fields blank. Header reads "New Student".
+**Edit mode:** All fields pre-filled from the existing record. Header reads the student's full name. A delete button appears in the header.
+
+The sidebar has a close (×) button. Clicking a student row anywhere in the table opens the sidebar in edit mode for that student.
+
+##### Student Form Fields
+
+All fields map directly to the Students table in Airtable (`tblpG4IVPaS8tq4bp`).
+
+**Student Info**
+
+| Field | Airtable Field | Type | Required | Notes |
+|-------|---------------|------|----------|-------|
+| First Name | First Name | text | **Yes** | |
+| Last Name | Last Name | text | **Yes** | |
+| Phone | Phone | phone | No | |
+| Email | Email | email | No | |
+| Address | Address | text | No | |
+| Teen | Teen | checkbox | No | Check if the student is a teen |
+
+**Guardian Info**
+
+| Field | Airtable Field | Type | Required | Notes |
+|-------|---------------|------|----------|-------|
+| Guardian First Name | Guardian First Name | text | No | |
+| Guardian Last Name | Guardian Last Name | text | No | |
+| Guardian Relation | Guardian Relation | text | No | Relationship to student (e.g. Parent, Guardian) |
+| Guardian Phone | Guardian Phone | phone | No | |
+| Guardian Email | Guardian Email | email | No | |
+
+> **Read-only fields** (not shown in form): Full Name (formula), Appointments link, Record ID, Created, Last Modified.
+
+##### Write Behavior
+
+- **Create:** POST to Students table with all non-empty fields. Full Name is a formula field computed by Airtable — never written.
+- **Update:** PATCH only the changed fields.
+- **Delete:** Prompts for confirmation before sending DELETE. Deleting a student does not cascade-delete their appointment records.
+
+##### Caching
+
+Students data in the Students view shares the same 30-minute cache used by `useReferenceData`. After any create, update, or delete, the students cache is immediately invalidated so the table reflects the change.
+
+---
+
+#### Availability View (`/availability`)
+
+The Availability view provides direct management of instructor/resource availability records from the Availability table (`tbl5db09IrQR5rmgU`). It uses a calendar-style time grid with resource lanes (same concept as the main calendar) and supports two modes.
+
+##### Layout
+
+- Vertical time axis (8am–9pm), same as main calendar
+- Columns = resource lanes: Car 1 → Car 2 → ... → Car 5 → Unassigned
+- Each block shows the assigned instructor name, vehicle, location, and time range
+- Block color follows instructor color from `INSTRUCTOR_ORDER` palette
+
+##### Two Modes (Toolbar Toggle)
+
+**Recurring Schedule mode:**
+- Edits the base recurrence records (the default weekly template)
+- Day-of-week filter in toolbar: `Mon | Tue | Wed | Thu | Fri | Sat | Sun` — shows one day at a time
+- Blocks represent raw `Scheduled` availability records, positioned by their anchor time-of-day
+- Click/drag edits update the underlying recurrence record in Airtable
+
+**Week View mode:**
+- Shows a specific week's expanded availability (recurrence expanded, block-offs subtracted)
+- Week navigation arrows + date range label (same pattern as main calendar)
+- Default: 7 day sub-columns (Mon–Sun) inside each resource lane for full-week at a glance
+- Can collapse to single-day via the day filter for a zoomed-in view
+- Visual distinction: Scheduled blocks = solid colored fill; Blocked-off records = striped/hatched overlay
+- Creating new records here defaults to `Status: "Blocked Off"` (exception for a specific date)
+
+##### Interactions
+
+- **Click existing block** → sidebar form opens to edit/delete that availability record
+- **Click empty slot** → sidebar form opens to create new record (Scheduled in Recurring mode, Blocked Off in Week View)
+- **Drag top/bottom edge of block** → resize (change start time or shift length), snaps to 15-minute increments, auto-saves on mouseup
+- **Drag block body** → move to different time or resource lane (future enhancement)
+
+##### Availability Form (Sidebar)
+
+The form opens as a sidebar (same pattern as appointment form). Fields:
+
+| Field | Input Type | Notes |
+|-------|-----------|-------|
+| Status | Segmented control | "Scheduled" or "Blocked Off" |
+| Instructor | LinkedSelect | From Instructors table |
+| Vehicle | LinkedSelect | From Cars table; optional for blocked-off records |
+| Location | Select | CH / GA / None |
+| Day of Week | Select (Recurring mode) | Mon–Sun; determines anchor date |
+| Date | Date picker (Week View) | Specific date for the record |
+| Start Time | Time input | Time of day the shift begins |
+| Shift Length | Hours + Minutes inputs | Stored as seconds in Airtable |
+| Cadence | Select | Weekly / Bi-Weekly |
+| Repeat Until | Date input | End of recurrence window (optional) |
+
+##### Shortcut Actions
+
+- **Block Instructor (vacation)**: Select instructor + date range → auto-creates `Blocked Off` records for each day the instructor is normally scheduled in that range. Shows preview count before confirming.
+- **Block Car (out of service)**: Select car + date range → auto-creates vehicle-only `Blocked Off` records covering 8am–9pm for each day in the range.
+
+##### Write Behavior
+
+- Availability records use **field names** (not IDs) in API calls, per `AVAIL_FIELDS` in constants
+- `Instructor` and `Vehicle` are linked record arrays: `[recId]`
+- `Shift Length` is stored as seconds (e.g., 28800 = 8 hours)
+- `Start` is an ISO datetime string serving as the recurrence anchor
+- `Repeate Until` (typo in Airtable) is an ISO date string
+- On any create/update/delete, the `["availability"]` cache is immediately invalidated
 
 ### Appointment Form
 
@@ -313,10 +469,46 @@ These fields are always shown regardless of course selection:
 
 Class # is only shown when the selected Course has `Numbered = true`. When visible, it is auto-calculated:
 
-1. When a Student + Course combination is selected, query all existing appointments for that student + course
-2. Find the highest `Class Number` among those records
-3. Set `Class Number = highest + 1`; if no prior appointments exist, default to `1`
-4. The calculated value is shown in the form (editable as an override if needed)
+1. When a Student + Course combination is selected, query all existing appointments for that student + course.
+2. Exclude appointments marked `Canceled = true` or `No Show = true`.
+3. For the proposed appointment date/time, find the most recent prior matching appointment (`Start < proposed Start`) in chronological order.
+4. Set `Class Number = (that prior appointment's Class Number) + 1`.
+5. If no prior non-canceled/non-no-show match exists before the proposed start, default to `1`.
+6. The calculated value is shown in the form (editable as an override if needed).
+
+#### Chronology Reindexing on Edit
+
+If an edit changes chronology for a numbered Student+Course sequence (for example changing Date/Start, changing Student, changing Course, or manually changing Class #), class numbering must be re-evaluated for that sequence in chronological order:
+
+1. Recompute class numbers from the edited appointment forward (future appointments in that Student+Course sequence).
+2. Keep numbering consistent and gap-free by chronological `Start` order.
+3. Exclude `Canceled` and `No Show` appointments from sequence numbering.
+4. Before saving, show a warning preview listing impacted future appointments and their class-number changes (old -> new).
+5. User must confirm the reindex operation for the save to proceed.
+
+#### Additional Classes
+
+Available only in **edit mode** (editing an existing appointment). The "Additional Classes" button appears in the form footer alongside "Save Changes".
+
+**Purpose:** From an existing appointment, quickly schedule more sessions for the same student/course/instructor — identical to Bulk Schedule but anchored to a real appointment rather than an unsaved draft. The user can see all pre-existing appointments for the same student+course in context while adding new ones.
+
+**Entry:** User clicks "Additional Classes" while viewing an existing appointment in the edit sidebar.
+
+**Flow:**
+
+1. The form transitions into **Additional Classes mode**. The form fields remain visible at the top (still showing the record being edited, still editable and saveable as normal).
+2. Below the edit form, a **read-only list** of all existing non-canceled/non-no-show appointments for the same student+course is shown (sorted chronologically). These are displayed as compact non-editable rows — label, date, time, instructor. They are informational only and cannot be opened/edited from this panel.
+3. Below the existing list, the user can add **new draft appointments** (same UX as Bulk Schedule — a count input + draft tabs). Drafts default to weekly from the current appointment's date.
+4. The user edits each draft independently (same per-draft override model as Bulk Schedule).
+5. Conflict and warning checks run identically to Bulk Schedule for each draft.
+6. Submitting creates only the new drafts (existing appointments are untouched unless the user has also edited the base record separately via "Save Changes").
+7. The "Additional Classes" mode can be exited without saving — returns the sidebar to normal edit mode.
+
+**Key differences from Bulk Schedule:**
+- Only available in edit mode (not create mode)
+- Shows existing appointments for that student+course as non-editable context rows
+- Does not replace the base edit form — both coexist, each with its own save action
+- Draft defaults start from the current appointment's date (not today)
 
 #### Bulk Scheduling
 
@@ -329,12 +521,14 @@ After filling in all form fields, the user chooses how to proceed:
 
 **Bulk Schedule flow:**
 
-1. User clicks "Bulk Schedule" — a number input appears asking how many appointments total
-2. The system generates `N` appointment drafts, each identical to the base form but with Start date offset by 1 week per slot (slot 1 = base date, slot 2 = +1 week, slot 3 = +2 weeks, etc.)
-3. The user sees a tabbed or paginated view of all drafts (e.g. "1 of 5", "2 of 5") and can navigate between them to make per-appointment adjustments (different instructor, time, car, etc.)
-4. Class Numbers auto-increment across the bulk set based on the same logic as single appointments, starting from the next available number
-5. When satisfied, user confirms and all drafts are submitted together (parallel POST requests)
-6. Any draft that fails validation (conflict, missing required field) blocks the entire submit and highlights the offending draft tab
+1. User clicks "Bulk Schedule" - a number input appears asking how many appointments total.
+2. The system generates `N` appointment drafts, each identical to the base form but with Start date offset by 1 week per slot (slot 1 = base date, slot 2 = +1 week, slot 3 = +2 weeks, etc.).
+3. The user sees a tabbed or paginated view of all drafts (e.g. "1 of 5", "2 of 5") and can navigate between them to make per-draft adjustments (different instructor, date, time, car, etc.).
+4. Draft order is chronological, not fixed to original creation index. If a draft date/time is changed, drafts are automatically re-sorted by Start.
+5. Draft labels and class numbers are recalculated after each draft edit so chronology always stays aligned (example: moving draft 5 to just after draft 1 makes it draft 2 and updates numbering for all following drafts).
+6. Class Numbers for bulk use the same rule as single scheduling: previous non-canceled/non-no-show match before each draft's Start + 1.
+7. When satisfied, user confirms and all drafts are submitted together (parallel POST requests).
+8. Any draft that fails validation (conflict, missing required field) blocks the entire submit and highlights the offending draft tab.
 
 ### Calendar Grid Constants
 
@@ -448,7 +642,7 @@ This section will grow as new error types are identified. All validation runs cl
 
 #### W1 — Instructor Not Available at Proposed Time *(warning)*
 
-**Trigger:** The selected instructor has no `"Scheduled"` availability interval (after subtracting `"Blocked Off"` records) that covers the proposed appointment's full time range on the selected date.
+**Trigger:** The selected instructor has no `"Scheduled"` availability interval (after applying `"Blocked Off"` override scope rules) that covers the proposed appointment's full time range on the selected date.
 
 **Severity:** Warning only — does not block submission.
 
@@ -517,6 +711,40 @@ or
 - Travel buffer is exactly 30 minutes (`TRAVEL_BUFFER_MS = 30 * 60 * 1000`)
 - Does not block submit — the scheduler may intentionally accept the tight window
 - Canceled and No Show appointments are excluded (same as E1–E3)
+
+---
+
+#### W5 — Instructor Not Marked Spanish-Capable *(warning)*
+
+**Trigger:** The appointment has `Spanish = true`, but the selected instructor is not marked as Spanish-capable in the Instructors table (`Spanish` field).
+
+**Severity:** Warning only — does not block submission.
+
+**Fields highlighted (orange):** Instructor
+
+**Message:** `"[Instructor Name] is not marked Spanish-capable in Airtable."`
+
+**Behavior:**
+- Fires whenever Instructor or Spanish flag changes.
+- Uses cached instructor reference data; no extra API call.
+- Does not block submit — scheduler may intentionally override.
+
+---
+
+#### W6 — Instructor Not Marked for Selected Tier *(warning)*
+
+**Trigger:** The appointment has a `Tier` selected (for example `EL` or `RL`), but the selected instructor's `Tiers` field in Airtable does not include that tier.
+
+**Severity:** Warning only — does not block submission.
+
+**Fields highlighted (orange):** Instructor
+
+**Message:** `"[Instructor Name] is not marked for tier [Tier] in Airtable."`
+
+**Behavior:**
+- Fires whenever Instructor or Tier changes.
+- Uses cached instructor reference data; no extra API call.
+- Does not block submit — scheduler may intentionally override.
 
 ---
 
@@ -698,8 +926,8 @@ All field IDs are centralized in [app/src/utils/constants.js](../app/src/utils/c
 
 | Field Name | Field ID | Type | Notes |
 |-----------|---------|------|-------|
-| Instructor | `fldUao9vyLTkkqAsh` | multipleRecordLinks | Linked instructor |
-| Vehicle | `fld6xoS3XDdBdX3Qd` | multipleRecordLinks | Linked car (may be absent for office/classroom shifts) |
+| Instructor | `fldUao9vyLTkkqAsh` | multipleRecordLinks | Linked instructor. For `Blocked Off`, may be left blank to create a vehicle-only block. |
+| Vehicle | `fld6xoS3XDdBdX3Qd` | multipleRecordLinks | Linked car. For `Blocked Off`, may be left blank to create an instructor-only block. |
 | Location | `fld3hPPZq6RjQfEHo` | singleSelect | `"CH"` (Colonial Heights) or `"GA"` (Glen Allen) |
 | Status | `fldQTPMjnjTLbAgN6` | singleSelect | `"Scheduled"` or `"Blocked Off"` |
 | Start | `fldsvwUb7vY8JVwQr` | dateTime | First occurrence; recurrence anchor |
@@ -707,3 +935,9 @@ All field IDs are centralized in [app/src/utils/constants.js](../app/src/utils/c
 | End | `fld9AfRH5dykYArQv` | dateTime formula | Read-only |
 | Cadence | `flddEcAhjU8RvIFlJ` | singleSelect | `"Weekly"`, `"Bi-Weekly"`, or `"Daily"` |
 | Repeate Until | `fldqclSXT33dNYKLq` | date | End of recurrence window (typo baked into Airtable) |
+
+For `Status = "Blocked Off"` records:
+- At least one of `Instructor` or `Vehicle` should be populated.
+- If both are populated, the block is pair-specific.
+- If only one is populated, the block applies broadly to that resource across pairings.
+

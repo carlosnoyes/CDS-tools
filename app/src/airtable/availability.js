@@ -1,4 +1,4 @@
-import { fetchAll } from "./client";
+import { fetchAll, createRecord, updateRecord, deleteRecord } from "./client";
 import { TABLES, AVAIL_FIELDS } from "@/utils/constants";
 
 // Fetch all availability records — we pull all of them and expand client-side.
@@ -8,4 +8,16 @@ export async function fetchAllAvailability() {
   return fetchAll(TABLES.availability, {
     "fields[]": Object.values(AVAIL_FIELDS),
   });
+}
+
+export async function createAvailability(fields) {
+  return createRecord(TABLES.availability, fields);
+}
+
+export async function updateAvailability(recordId, fields) {
+  return updateRecord(TABLES.availability, recordId, fields);
+}
+
+export async function deleteAvailability(recordId) {
+  return deleteRecord(TABLES.availability, recordId);
 }

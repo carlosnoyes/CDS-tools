@@ -9,8 +9,9 @@ import LinkedSelect from "./LinkedSelect";
 import { CLASSROOMS, PUDO_OPTIONS, LOCATION_LABELS } from "@/utils/constants";
 import { useCreateAppointment, useUpdateAppointment, useAppointments } from "@/hooks/useAppointments";
 import { useAvailability } from "@/hooks/useAvailability";
-import { detectConflicts, checkAvailabilityWarnings, getAvailabilityCar, getAvailabilityLocation, checkLocationTravelWarning } from "@/utils/conflicts";
+import { detectConflicts, checkAvailabilityWarnings, getAvailabilityCar, getAvailabilityLocation, checkLocationTravelWarning, checkInstructorCapabilityWarnings } from "@/utils/conflicts";
 import { expandAvailability } from "@/utils/availability";
+import { fullName, courseLabel } from "@/hooks/useReferenceData";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -60,6 +61,106 @@ function shiftDateByWeeks(dateStr, weeks) {
 
 function todayStr() {
   return format(new Date(), "yyyy-MM-dd");
+}
+
+function toMs(iso) {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  return Number.isNaN(t) ? null : t;
+}
+
+function isActiveForClassSeq(appt) {
+  if (!appt?.fields) return false;
+  if (appt.fields.Canceled || appt.fields["No Show"]) return false;
+  return true;
+}
+
+function normalizeClassNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
+}
+
+function mostRecentPriorClassNumber(allAppts, studentId, courseId, startISO, skipRecordId = null) {
+  if (!studentId || !courseId || !startISO) return null;
+  const startMs = toMs(startISO);
+  if (startMs == null) return null;
+
+  let best = null;
+  for (const a of allAppts) {
+    if (skipRecordId && a.id === skipRecordId) continue;
+    if (!isActiveForClassSeq(a)) continue;
+    const f = a.fields;
+    if (f.Student?.[0] !== studentId || f.Course?.[0] !== courseId) continue;
+    if (!f.Start) continue;
+    const aStartMs = toMs(f.Start);
+    if (aStartMs == null || aStartMs >= startMs) continue;
+    const classNum = normalizeClassNumber(f["Class Number"]);
+    if (!classNum) continue;
+    if (!best || aStartMs > best.startMs) best = { startMs: aStartMs, classNum };
+  }
+  return best?.classNum ?? null;
+}
+
+function buildChronologicalReindexPlan(allAppts, sequenceKeys, pivotByKey, overrideById = {}) {
+  const updates = [];
+
+  for (const key of sequenceKeys) {
+    const [studentId, courseId] = key.split("|");
+    const pivotMs = toMs(pivotByKey[key]);
+    if (!studentId || !courseId || pivotMs == null) continue;
+
+    const sequence = allAppts
+      .filter((a) => {
+        const f = a.fields;
+        if (!isActiveForClassSeq(a)) return false;
+        return f.Student?.[0] === studentId && f.Course?.[0] === courseId && f.Start;
+      })
+      .map((a) => {
+        const override = overrideById[a.id];
+        const startISO = override?.Start ?? a.fields.Start;
+        const startMs = toMs(startISO);
+        const classNum = normalizeClassNumber(override?.["Class Number"] ?? a.fields["Class Number"]);
+        return { appt: a, startMs, classNum };
+      })
+      .filter((x) => x.startMs != null)
+      .sort((a, b) => a.startMs - b.startMs);
+
+    let expected = 1;
+    for (const row of sequence) {
+      const oldClass = normalizeClassNumber(row.appt.fields["Class Number"]);
+      const newClass = expected++;
+      if (row.startMs >= pivotMs && oldClass !== newClass) {
+        updates.push({
+          recordId: row.appt.id,
+          startMs: row.startMs,
+          oldClass,
+          newClass,
+          studentId,
+          courseId,
+        });
+      }
+    }
+  }
+
+  return updates;
+}
+
+function previewReindexMessage(updates, limit = 12) {
+  if (!updates.length) return "";
+  const lines = updates
+    .sort((a, b) => a.startMs - b.startMs)
+    .slice(0, limit)
+    .map((u) => {
+      const date = format(new Date(u.startMs), "yyyy-MM-dd HH:mm");
+      return `${date}: ${u.oldClass ?? "—"} -> ${u.newClass}`;
+    });
+  const extra = updates.length > limit ? `\n...and ${updates.length - limit} more` : "";
+  return (
+    "Saving this edit will reindex future class numbers for chronological consistency.\n\n" +
+    lines.join("\n") +
+    extra +
+    "\n\nContinue?"
+  );
 }
 
 function defaultValues(record, prefill) {
@@ -306,6 +407,15 @@ export default function AppointmentForm({ record, prefill, refData, onClose, sta
   const [submitting, setSubmitting] = useState(false);
   const [submitAttempted, setSubmitAttempted] = useState(false);
 
+  // Additional Classes mode state (edit mode only)
+  const [additionalClassesMode, setAdditionalClassesMode] = useState(false);
+  const [acCount, setAcCount] = useState(4);
+  const [acActiveDraft, setAcActiveDraft] = useState(0);
+  const [acDraftOverrides, setAcDraftOverrides] = useState({});
+  const [acDraftConflicts, setAcDraftConflicts] = useState({});
+  const [acDraftWarnings, setAcDraftWarnings] = useState({});
+  const [acSubmitting, setAcSubmitting] = useState(false);
+
   // Base form (always present — used for single AND as template for bulk)
   const baseForm = useForm({ defaultValues: defaultValues(record, prefill) });
   const { watch: watchBase, setValue: setBaseValue, reset: resetBase, handleSubmit: handleBaseSubmit } = baseForm;
@@ -351,22 +461,12 @@ export default function AppointmentForm({ record, prefill, refData, onClose, sta
   const farFuture = useMemo(() => addDays(new Date(), 365), []);
   const { data: allAppts = [] } = useAppointments(farPast, farFuture);
 
-  useEffect(() => {
-    if (!studentId || !courseId || isEdit) return;
-    const matching = allAppts.filter(
-      (a) => a.fields.Student?.[0] === studentId && a.fields.Course?.[0] === courseId
-    );
-    const maxClass = matching.reduce((max, a) => {
-      const n = a.fields["Class Number"];
-      return n > max ? n : max;
-    }, 0);
-    setBaseValue("classNumber", maxClass + 1);
-  }, [studentId, courseId, allAppts, isEdit]);
-
   // 9 — Conflict detection (eager, runs off watched values)
   const instructorId = watchBase("Instructor");
   const carId        = watchBase("Cars");
   const locationVal  = watchBase("Location");
+  const tierVal      = watchBase("Tier");
+  const spanishVal   = watchBase("Spanish");
   const startDate_   = watchBase("startDate");
   const startTime_   = watchBase("startTime");
   const pudoVal      = watchBase("pudo");
@@ -383,6 +483,18 @@ export default function AppointmentForm({ record, prefill, refData, onClose, sta
     },
     [startDate_, startTime_]
   );
+
+  useEffect(() => {
+    if (!studentId || !courseId || !baseStartISO || isEdit) return;
+    const priorClass = mostRecentPriorClassNumber(
+      allAppts,
+      studentId,
+      courseId,
+      baseStartISO,
+      null
+    );
+    setBaseValue("classNumber", (priorClass ?? 0) + 1);
+  }, [studentId, courseId, baseStartISO, allAppts, isEdit, setBaseValue]);
 
   const conflicts = useMemo(() => {
     if (!baseStartISO) return [];
@@ -454,8 +566,15 @@ export default function AppointmentForm({ record, prefill, refData, onClose, sta
       refData
     );
     if (w4) w.push(w4);
+    // W5/W6 — instructor capability mismatch (Spanish/Tier)
+    w.push(
+      ...checkInstructorCapabilityWarnings(
+        { instructorId, spanish: !!spanishVal, tier: tierVal || null },
+        refData
+      )
+    );
     return w;
-  }, [availIntervalsForDate, baseStartISO, baseEndMs, instructorId, carId, locationVal, isInCar, allAppts, record?.id, refData]);
+  }, [availIntervalsForDate, baseStartISO, baseEndMs, instructorId, carId, locationVal, isInCar, allAppts, record?.id, refData, spanishVal, tierVal]);
 
   const warningByField = useMemo(() => {
     const map = {};
@@ -484,15 +603,11 @@ export default function AppointmentForm({ record, prefill, refData, onClose, sta
   // Bulk draft conflict tracking
   const [draftConflicts, setDraftConflicts] = useState({});  // index → conflict[]
   const [draftWarnings, setDraftWarnings] = useState({});    // index → warning[]
+  const baseFormSnapshot = baseForm.watch();
 
   // Draft override forms (one per extra slot in bulk mode)
   // We use a simple approach: store just the overridden field values per draft index
   // and merge with base values at submit time.
-
-  function getDraftForm(idx) {
-    // Draft 0 = base form. Others use draftOverrides[idx] merged over base.
-    return draftOverrides[idx] ?? {};
-  }
 
   function setDraftField(idx, field, value) {
     setDraftOverrides((prev) => ({
@@ -501,33 +616,90 @@ export default function AppointmentForm({ record, prefill, refData, onClose, sta
     }));
   }
 
-  function getMergedDraftValues(idx) {
+  function getRawDraftValues(idx) {
     const base = baseForm.getValues();
     const override = draftOverrides[idx] ?? {};
-    // Shift date by idx weeks for drafts beyond base
+    // Base generation uses +idx week offset; later display/order is chronological.
     const shifted = {
       ...base,
       startDate: shiftDateByWeeks(base.startDate, idx),
-      classNumber: base.classNumber ? Number(base.classNumber) + idx : idx + 1,
     };
     return { ...shifted, ...override };
   }
 
-  // ── Live conflict + warning detection for the active bulk draft ───────────
-  // We need fully reactive base values (from watchBase) so changes to the base form
-  // immediately propagate to the active draft's conflict/warning computation.
-  const baseFormSnapshot = baseForm.watch(); // subscribes to all base field changes
+  const draftEntries = useMemo(() => {
+    if (!bulkMode) return [];
+    return Array.from({ length: bulkCount }, (_, idx) => {
+      const values = getRawDraftValues(idx);
+      const startISO = values.startDate && values.startTime
+        ? new Date(values.startDate + "T" + values.startTime).toISOString()
+        : null;
+      return { idx, values, startISO, startMs: toMs(startISO) };
+    });
+  }, [bulkMode, bulkCount, draftOverrides, baseFormSnapshot]);
+
+  const orderedDraftEntries = useMemo(() => {
+    if (!bulkMode) return [];
+    return [...draftEntries].sort((a, b) => {
+      if (a.startMs == null && b.startMs == null) return a.idx - b.idx;
+      if (a.startMs == null) return 1;
+      if (b.startMs == null) return -1;
+      if (a.startMs !== b.startMs) return a.startMs - b.startMs;
+      return a.idx - b.idx;
+    });
+  }, [bulkMode, draftEntries]);
+
+  const draftOrderByIdx = useMemo(() => {
+    const out = {};
+    orderedDraftEntries.forEach((entry, order) => {
+      out[entry.idx] = order + 1;
+    });
+    return out;
+  }, [orderedDraftEntries]);
+
+  const draftClassByIdx = useMemo(() => {
+    if (!bulkMode || !isNumbered) return {};
+    const prior = [];
+    for (const a of allAppts) {
+      if (!isActiveForClassSeq(a)) continue;
+      const f = a.fields;
+      const startMs = toMs(f.Start);
+      const classNum = normalizeClassNumber(f["Class Number"]);
+      if (!f.Student?.[0] || !f.Course?.[0] || startMs == null || !classNum) continue;
+      prior.push({
+        studentId: f.Student[0],
+        courseId: f.Course[0],
+        startMs,
+        classNum,
+      });
+    }
+
+    const assigned = {};
+    const synthetic = [];
+    for (const entry of orderedDraftEntries) {
+      const { idx, values, startMs } = entry;
+      if (!values.Student || !values.Course || startMs == null) continue;
+      const candidates = [...prior, ...synthetic]
+        .filter((r) => r.studentId === values.Student && r.courseId === values.Course && r.startMs < startMs)
+        .sort((a, b) => b.startMs - a.startMs);
+      const classNum = (candidates[0]?.classNum ?? 0) + 1;
+      assigned[idx] = classNum;
+      synthetic.push({ studentId: values.Student, courseId: values.Course, startMs, classNum });
+    }
+    return assigned;
+  }, [bulkMode, isNumbered, allAppts, orderedDraftEntries]);
+
+  function getMergedDraftValues(idx) {
+    const base = getRawDraftValues(idx);
+    if (!isNumbered) return base;
+    const computedClass = draftClassByIdx[idx];
+    return { ...base, classNumber: computedClass ?? base.classNumber };
+  }
 
   const activeDraftValues = useMemo(() => {
     if (!bulkMode) return null;
-    const override = draftOverrides[activeDraft] ?? {};
-    const shifted = {
-      ...baseFormSnapshot,
-      startDate: shiftDateByWeeks(baseFormSnapshot.startDate, activeDraft),
-      classNumber: baseFormSnapshot.classNumber ? Number(baseFormSnapshot.classNumber) + activeDraft : activeDraft + 1,
-    };
-    return { ...shifted, ...override };
-  }, [bulkMode, activeDraft, draftOverrides, baseFormSnapshot]);
+    return getMergedDraftValues(activeDraft);
+  }, [bulkMode, activeDraft, draftOverrides, baseFormSnapshot, draftClassByIdx, isNumbered]);
 
   const activeDraftStartISO = useMemo(() => {
     if (!activeDraftValues?.startDate || !activeDraftValues?.startTime) return null;
@@ -559,13 +731,34 @@ export default function AppointmentForm({ record, prefill, refData, onClose, sta
   }, [bulkMode, allAppts, activeDraftStartISO, activeDraftValues?.Student, activeDraftValues?.Instructor, activeDraftValues?.Cars, isInCar, courseLengthSec, activeDraftValues?.pudo, refData]);
 
   const activeDraftWarnings = useMemo(() => {
-    if (!bulkMode || !activeDraftStartISO || !activeDraftEndMs || !isInCar) return [];
-    return checkAvailabilityWarnings(
-      activeDraftAvailIntervals,
-      { startISO: activeDraftStartISO, endMs: activeDraftEndMs, instructorId: activeDraftValues.Instructor, carId: activeDraftValues.Cars },
-      refData
+    if (!bulkMode || !activeDraftValues) return [];
+    const w = [];
+    if (activeDraftStartISO && activeDraftEndMs && isInCar) {
+      w.push(
+        ...checkAvailabilityWarnings(
+          activeDraftAvailIntervals,
+          {
+            startISO: activeDraftStartISO,
+            endMs: activeDraftEndMs,
+            instructorId: activeDraftValues.Instructor,
+            carId: activeDraftValues.Cars,
+          },
+          refData
+        )
+      );
+    }
+    w.push(
+      ...checkInstructorCapabilityWarnings(
+        {
+          instructorId: activeDraftValues.Instructor,
+          spanish: !!activeDraftValues.Spanish,
+          tier: activeDraftValues.Tier || null,
+        },
+        refData
+      )
     );
-  }, [bulkMode, activeDraftAvailIntervals, activeDraftStartISO, activeDraftEndMs, activeDraftValues?.Instructor, activeDraftValues?.Cars, isInCar, refData]);
+    return w;
+  }, [bulkMode, activeDraftValues, activeDraftAvailIntervals, activeDraftStartISO, activeDraftEndMs, isInCar, refData]);
 
   // Keep draftConflicts + draftWarnings in sync with live values for the active draft
   useEffect(() => {
@@ -605,6 +798,245 @@ export default function AppointmentForm({ record, prefill, refData, onClose, sta
     return map;
   }, [activeDraftWarnings]);
 
+  // ── Additional Classes draft machinery ────────────────────────────────────
+
+  // Existing appointments for same student+course (for the read-only context list)
+  const acExistingAppts = useMemo(() => {
+    if (!isEdit || !studentId || !courseId) return [];
+    return allAppts
+      .filter((a) => {
+        if (!isActiveForClassSeq(a)) return false;
+        const f = a.fields;
+        return f.Student?.[0] === studentId && f.Course?.[0] === courseId;
+      })
+      .sort((a, b) => {
+        const ta = toMs(a.fields.Start) ?? 0;
+        const tb = toMs(b.fields.Start) ?? 0;
+        return ta - tb;
+      });
+  }, [isEdit, studentId, courseId, allAppts]);
+
+  // Base date for AC drafts = current record's date (or today)
+  const acBaseDate = useMemo(() => {
+    if (!record) return todayStr();
+    return toDateInput(record.fields.Start) || todayStr();
+  }, [record]);
+
+  function getAcRawDraftValues(idx) {
+    const base = baseForm.getValues();
+    const override = acDraftOverrides[idx] ?? {};
+    const shifted = {
+      ...base,
+      startDate: shiftDateByWeeks(acBaseDate, idx + 1),
+    };
+    return { ...shifted, ...override };
+  }
+
+  const acDraftEntries = useMemo(() => {
+    if (!additionalClassesMode) return [];
+    return Array.from({ length: acCount }, (_, idx) => {
+      const values = getAcRawDraftValues(idx);
+      const startISO = values.startDate && values.startTime
+        ? new Date(values.startDate + "T" + values.startTime).toISOString()
+        : null;
+      return { idx, values, startISO, startMs: toMs(startISO) };
+    });
+  }, [additionalClassesMode, acCount, acDraftOverrides, baseFormSnapshot, acBaseDate]);
+
+  const acOrderedDrafts = useMemo(() => {
+    if (!additionalClassesMode) return [];
+    return [...acDraftEntries].sort((a, b) => {
+      if (a.startMs == null && b.startMs == null) return a.idx - b.idx;
+      if (a.startMs == null) return 1;
+      if (b.startMs == null) return -1;
+      if (a.startMs !== b.startMs) return a.startMs - b.startMs;
+      return a.idx - b.idx;
+    });
+  }, [additionalClassesMode, acDraftEntries]);
+
+  const acDraftOrderByIdx = useMemo(() => {
+    const out = {};
+    acOrderedDrafts.forEach((entry, order) => { out[entry.idx] = order + 1; });
+    return out;
+  }, [acOrderedDrafts]);
+
+  const acDraftClassByIdx = useMemo(() => {
+    if (!additionalClassesMode || !isNumbered) return {};
+    const prior = [];
+    for (const a of allAppts) {
+      if (!isActiveForClassSeq(a)) continue;
+      const f = a.fields;
+      const startMs = toMs(f.Start);
+      const classNum = normalizeClassNumber(f["Class Number"]);
+      if (!f.Student?.[0] || !f.Course?.[0] || startMs == null || !classNum) continue;
+      prior.push({ studentId: f.Student[0], courseId: f.Course[0], startMs, classNum });
+    }
+    const assigned = {};
+    const synthetic = [];
+    for (const entry of acOrderedDrafts) {
+      const { idx, values, startMs } = entry;
+      if (!values.Student || !values.Course || startMs == null) continue;
+      const candidates = [...prior, ...synthetic]
+        .filter((r) => r.studentId === values.Student && r.courseId === values.Course && r.startMs < startMs)
+        .sort((a, b) => b.startMs - a.startMs);
+      const classNum = (candidates[0]?.classNum ?? 0) + 1;
+      assigned[idx] = classNum;
+      synthetic.push({ studentId: values.Student, courseId: values.Course, startMs, classNum });
+    }
+    return assigned;
+  }, [additionalClassesMode, isNumbered, allAppts, acOrderedDrafts]);
+
+  function getAcMergedDraftValues(idx) {
+    const base = getAcRawDraftValues(idx);
+    if (!isNumbered) return base;
+    const computedClass = acDraftClassByIdx[idx];
+    return { ...base, classNumber: computedClass ?? base.classNumber };
+  }
+
+  const acActiveDraftValues = useMemo(() => {
+    if (!additionalClassesMode) return null;
+    return getAcMergedDraftValues(acActiveDraft);
+  }, [additionalClassesMode, acActiveDraft, acDraftOverrides, baseFormSnapshot, acDraftClassByIdx, isNumbered]);
+
+  const acActiveDraftStartISO = useMemo(() => {
+    if (!acActiveDraftValues?.startDate || !acActiveDraftValues?.startTime) return null;
+    return new Date(acActiveDraftValues.startDate + "T" + acActiveDraftValues.startTime).toISOString();
+  }, [acActiveDraftValues?.startDate, acActiveDraftValues?.startTime]);
+
+  const acActiveDraftEndMs = useMemo(() => {
+    if (!acActiveDraftStartISO) return null;
+    const pudoMinutes = acActiveDraftValues.pudo === "0:30" ? 30 : acActiveDraftValues.pudo === "1:00" ? 60 : 0;
+    return new Date(acActiveDraftStartISO).getTime() + ((courseLengthSec ?? 0) + pudoMinutes * 2 * 60) * 1000;
+  }, [acActiveDraftStartISO, courseLengthSec, acActiveDraftValues?.pudo]);
+
+  const acActiveDraftAvailIntervals = useMemo(() => {
+    if (!additionalClassesMode || !acActiveDraftValues?.startDate) return [];
+    try { return expandAvailability(availRecords, new Date(acActiveDraftValues.startDate + "T00:00:00")); }
+    catch { return []; }
+  }, [additionalClassesMode, acActiveDraftValues?.startDate, availRecords]);
+
+  const acActiveDraftConflicts = useMemo(() => {
+    if (!additionalClassesMode || !acActiveDraftStartISO) return [];
+    return detectConflicts(
+      allAppts,
+      { startISO: acActiveDraftStartISO, studentId: acActiveDraftValues.Student, instructorId: acActiveDraftValues.Instructor, carId: acActiveDraftValues.Cars },
+      { isInCar, courseLengthSec, pudoOption: acActiveDraftValues.pudo },
+      null,
+      refData
+    );
+  }, [additionalClassesMode, allAppts, acActiveDraftStartISO, acActiveDraftValues?.Student, acActiveDraftValues?.Instructor, acActiveDraftValues?.Cars, isInCar, courseLengthSec, acActiveDraftValues?.pudo, refData]);
+
+  const acActiveDraftWarnings = useMemo(() => {
+    if (!additionalClassesMode || !acActiveDraftValues) return [];
+    const w = [];
+    if (acActiveDraftStartISO && acActiveDraftEndMs && isInCar) {
+      w.push(...checkAvailabilityWarnings(
+        acActiveDraftAvailIntervals,
+        { startISO: acActiveDraftStartISO, endMs: acActiveDraftEndMs, instructorId: acActiveDraftValues.Instructor, carId: acActiveDraftValues.Cars },
+        refData
+      ));
+    }
+    w.push(...checkInstructorCapabilityWarnings(
+      { instructorId: acActiveDraftValues.Instructor, spanish: !!acActiveDraftValues.Spanish, tier: acActiveDraftValues.Tier || null },
+      refData
+    ));
+    return w;
+  }, [additionalClassesMode, acActiveDraftValues, acActiveDraftAvailIntervals, acActiveDraftStartISO, acActiveDraftEndMs, isInCar, refData]);
+
+  useEffect(() => {
+    if (!additionalClassesMode) return;
+    setAcDraftConflicts((prev) => {
+      if (acActiveDraftConflicts.length === 0) { const next = { ...prev }; delete next[acActiveDraft]; return next; }
+      return { ...prev, [acActiveDraft]: acActiveDraftConflicts };
+    });
+    setAcDraftWarnings((prev) => {
+      if (acActiveDraftWarnings.length === 0) { const next = { ...prev }; delete next[acActiveDraft]; return next; }
+      return { ...prev, [acActiveDraft]: acActiveDraftWarnings };
+    });
+  }, [additionalClassesMode, acActiveDraft, acActiveDraftConflicts, acActiveDraftWarnings]);
+
+  const acActiveDraftConflictByField = useMemo(() => {
+    const map = {};
+    for (const c of acActiveDraftConflicts) { for (const f of c.fields) { if (!map[f]) map[f] = c; } }
+    return map;
+  }, [acActiveDraftConflicts]);
+
+  const acActiveDraftWarningByField = useMemo(() => {
+    const map = {};
+    for (const w of acActiveDraftWarnings) { for (const f of w.fields) { if (!map[f]) map[f] = w; } }
+    return map;
+  }, [acActiveDraftWarnings]);
+
+  // ── Additional Classes submit ──────────────────────────────────────────────
+  async function onAdditionalClassesSubmit() {
+    // Re-check all drafts before submitting
+    const allResults = acOrderedDrafts.map((entry) => {
+      const i = entry.idx;
+      const vals = getAcMergedDraftValues(i);
+      const draftStartISO = vals.startDate && vals.startTime
+        ? new Date(vals.startDate + "T" + vals.startTime).toISOString()
+        : null;
+      const draftEndMs = draftStartISO
+        ? (() => {
+            const pudoMinutes = vals.pudo === "0:30" ? 30 : vals.pudo === "1:00" ? 60 : 0;
+            return new Date(draftStartISO).getTime() + ((courseLengthSec ?? 0) + pudoMinutes * 2 * 60) * 1000;
+          })()
+        : null;
+      const conflicts = detectConflicts(
+        allAppts,
+        { startISO: draftStartISO, studentId: vals.Student, instructorId: vals.Instructor, carId: vals.Cars },
+        { isInCar, courseLengthSec, pudoOption: vals.pudo },
+        null,
+        refData
+      );
+      const availForDate = draftStartISO && isInCar
+        ? (() => { try { return expandAvailability(availRecords, new Date(vals.startDate + "T00:00:00")); } catch { return []; } })()
+        : [];
+      const warnings = draftStartISO && draftEndMs && isInCar
+        ? checkAvailabilityWarnings(availForDate, { startISO: draftStartISO, endMs: draftEndMs, instructorId: vals.Instructor, carId: vals.Cars }, refData)
+        : [];
+      warnings.push(...checkInstructorCapabilityWarnings(
+        { instructorId: vals.Instructor, spanish: !!vals.Spanish, tier: vals.Tier || null }, refData
+      ));
+      return { idx: i, conflicts, warnings };
+    });
+
+    const newConflicts = {};
+    const newWarnings = {};
+    allResults.forEach(({ idx, conflicts, warnings }) => {
+      if (conflicts.length) newConflicts[idx] = conflicts;
+      if (warnings.length)  newWarnings[idx]  = warnings;
+    });
+    setAcDraftConflicts(newConflicts);
+    setAcDraftWarnings(newWarnings);
+
+    const conflictedDrafts = Object.keys(newConflicts).map(Number);
+    if (conflictedDrafts.length > 0) {
+      toast.error("Draft" + (conflictedDrafts.length > 1 ? "s" : "") + " " +
+        conflictedDrafts.map((i) => acDraftOrderByIdx[i] ?? (i + 1)).join(", ") + " have conflicts — review before submitting");
+      return;
+    }
+
+    setAcSubmitting(true);
+    try {
+      const drafts = acOrderedDrafts.map((entry) => getAcMergedDraftValues(entry.idx));
+      const results = await Promise.allSettled(
+        drafts.map((data) => create.mutateAsync(buildFields(data, courseFlags)))
+      );
+      const failed = results.filter((r) => r.status === "rejected").length;
+      if (failed === 0) {
+        toast.success("Created " + acCount + " additional appointment" + (acCount !== 1 ? "s" : ""));
+        setAdditionalClassesMode(false);
+        setAcDraftOverrides({});
+        setAcActiveDraft(0);
+      } else {
+        toast.error(failed + " of " + acCount + " appointments failed — check and retry");
+      }
+    } finally {
+      setAcSubmitting(false);
+    }
+  }
+
   // ── Single submit ─────────────────────────────────────────────────────────
   async function onSingleSubmit(data) {
     setSubmitAttempted(true);
@@ -614,10 +1046,73 @@ export default function AppointmentForm({ record, prefill, refData, onClose, sta
       return;
     }
     const fields = buildFields(data, courseFlags);
+    let postSaveReindexUpdates = [];
+
+    const shouldReindexEdit =
+      isEdit &&
+      (isNumbered || normalizeClassNumber(record?.fields?.["Class Number"])) &&
+      data.Student &&
+      data.Course &&
+      data.startDate &&
+      data.startTime;
+
+    if (shouldReindexEdit) {
+      const newStartISO = combineDateTime(data.startDate, data.startTime);
+      const oldStudentId = record?.fields?.Student?.[0] ?? null;
+      const oldCourseId = record?.fields?.Course?.[0] ?? null;
+      const oldStartISO = record?.fields?.Start ?? newStartISO;
+      const newStudentId = data.Student;
+      const newCourseId = data.Course;
+
+      const keyFor = (student, course) => (student && course ? `${student}|${course}` : null);
+      const oldKey = keyFor(oldStudentId, oldCourseId);
+      const newKey = keyFor(newStudentId, newCourseId);
+      const sequenceKeys = [...new Set([oldKey, newKey].filter(Boolean))];
+      const pivotByKey = {};
+      if (oldKey) pivotByKey[oldKey] = oldStartISO;
+      if (newKey) pivotByKey[newKey] = newStartISO;
+
+      const overrideById = {
+        [record.id]: {
+          Student: newStudentId ? [newStudentId] : [],
+          Course: newCourseId ? [newCourseId] : [],
+          Start: newStartISO,
+          Canceled: !!data.Canceled,
+          "No Show": !!data["No Show"],
+          "Class Number": normalizeClassNumber(data.classNumber),
+        },
+      };
+
+      const reindexUpdates = buildChronologicalReindexPlan(
+        allAppts,
+        sequenceKeys,
+        pivotByKey,
+        overrideById
+      );
+
+      if (reindexUpdates.length > 0) {
+        const confirmed = window.confirm(previewReindexMessage(reindexUpdates));
+        if (!confirmed) return;
+
+        const selfUpdate = reindexUpdates.find((u) => u.recordId === record.id);
+        if (selfUpdate) fields["Class Number"] = selfUpdate.newClass;
+        postSaveReindexUpdates = reindexUpdates.filter((u) => u.recordId !== record.id);
+      }
+    }
+
     try {
       if (isEdit) {
         await update.mutateAsync({ recordId: record.id, fields });
-        toast.success("Appointment updated");
+        if (postSaveReindexUpdates.length > 0) {
+          await Promise.all(
+            postSaveReindexUpdates.map((u) =>
+              update.mutateAsync({ recordId: u.recordId, fields: { "Class Number": u.newClass } })
+            )
+          );
+          toast.success("Appointment updated and class numbers reindexed");
+        } else {
+          toast.success("Appointment updated");
+        }
       } else {
         await create.mutateAsync(fields);
         toast.success("Appointment created");
@@ -632,7 +1127,8 @@ export default function AppointmentForm({ record, prefill, refData, onClose, sta
   async function onBulkSubmit() {
     setSubmitAttempted(true);
     // Check all drafts for conflicts + warnings before submitting
-    const allDraftResults = Array.from({ length: bulkCount }, (_, i) => {
+    const allDraftResults = orderedDraftEntries.map((entry) => {
+      const i = entry.idx;
       const vals = getMergedDraftValues(i);
       const draftStartISO = vals.startDate && vals.startTime
         ? new Date(vals.startDate + "T" + vals.startTime).toISOString()
@@ -656,14 +1152,20 @@ export default function AppointmentForm({ record, prefill, refData, onClose, sta
       const warnings = draftStartISO && draftEndMs && isInCar
         ? checkAvailabilityWarnings(availForDate, { startISO: draftStartISO, endMs: draftEndMs, instructorId: vals.Instructor, carId: vals.Cars }, refData)
         : [];
-      return { conflicts, warnings };
+      warnings.push(
+        ...checkInstructorCapabilityWarnings(
+          { instructorId: vals.Instructor, spanish: !!vals.Spanish, tier: vals.Tier || null },
+          refData
+        )
+      );
+      return { idx: i, conflicts, warnings };
     });
 
     const newDraftConflicts = {};
     const newDraftWarnings = {};
-    allDraftResults.forEach(({ conflicts, warnings }, i) => {
-      if (conflicts.length) newDraftConflicts[i] = conflicts;
-      if (warnings.length)  newDraftWarnings[i]  = warnings;
+    allDraftResults.forEach(({ idx, conflicts, warnings }) => {
+      if (conflicts.length) newDraftConflicts[idx] = conflicts;
+      if (warnings.length)  newDraftWarnings[idx]  = warnings;
     });
     setDraftConflicts(newDraftConflicts);
     setDraftWarnings(newDraftWarnings);
@@ -671,12 +1173,12 @@ export default function AppointmentForm({ record, prefill, refData, onClose, sta
     const conflictedDrafts = Object.keys(newDraftConflicts).map(Number);
     if (conflictedDrafts.length > 0) {
       toast.error("Draft" + (conflictedDrafts.length > 1 ? "s" : "") + " " +
-        conflictedDrafts.map((i) => i + 1).join(", ") + " have conflicts — review before submitting");
+        conflictedDrafts.map((i) => draftOrderByIdx[i] ?? (i + 1)).join(", ") + " have conflicts — review before submitting");
       return;
     }
     setSubmitting(true);
     try {
-      const drafts = Array.from({ length: bulkCount }, (_, i) => getMergedDraftValues(i));
+      const drafts = orderedDraftEntries.map((entry) => getMergedDraftValues(entry.idx));
       const results = await Promise.allSettled(
         drafts.map((data) => create.mutateAsync(buildFields(data, courseFlags)))
       );
@@ -729,7 +1231,8 @@ export default function AppointmentForm({ record, prefill, refData, onClose, sta
       {/* ── Bulk draft tabs ── */}
       {bulkMode && !isEdit && (
         <div className="flex gap-1 flex-wrap">
-          {Array.from({ length: bulkCount }, (_, i) => {
+          {orderedDraftEntries.map((entry, orderIdx) => {
+            const i = entry.idx;
             const vals = getMergedDraftValues(i);
             const hasOverride = !!draftOverrides[i] && Object.keys(draftOverrides[i]).length > 0;
             const hasDraftConflict = !!(draftConflicts[i]?.length);
@@ -752,7 +1255,7 @@ export default function AppointmentForm({ record, prefill, refData, onClose, sta
                     : "bg-background border-border text-muted-foreground hover:bg-muted")
                 }
               >
-                {i + 1}
+                {orderIdx + 1}
                 {hasDraftConflict && <span className="ml-0.5">!</span>}
                 {hasDraftWarning  && <span className="ml-0.5">~</span>}
                 {vals.startDate && <span className="ml-1 opacity-70">{vals.startDate.slice(5)}</span>}
@@ -790,6 +1293,16 @@ export default function AppointmentForm({ record, prefill, refData, onClose, sta
                 Bulk Schedule
               </Button>
             )}
+            {isEdit && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => { setAdditionalClassesMode((v) => !v); setAcActiveDraft(0); setAcDraftOverrides({}); }}
+                disabled={isBusy}
+              >
+                {additionalClassesMode ? "Hide Additional Classes" : "Additional Classes"}
+              </Button>
+            )}
             <Button type="submit" disabled={isBusy || hasConflicts}>
               {isBusy ? "Saving..." : isEdit ? "Save Changes" : "Create Appointment"}
             </Button>
@@ -817,6 +1330,7 @@ export default function AppointmentForm({ record, prefill, refData, onClose, sta
           <BulkDraftPanel
             key={activeDraft}
             draftIndex={activeDraft}
+            draftOrder={draftOrderByIdx[activeDraft] ?? (activeDraft + 1)}
             values={getMergedDraftValues(activeDraft)}
             overrides={draftOverrides[activeDraft] ?? {}}
             refData={refData}
@@ -844,6 +1358,38 @@ export default function AppointmentForm({ record, prefill, refData, onClose, sta
           </Button>
         </div>
       )}
+
+      {/* ── Additional Classes panel ── */}
+      {isEdit && additionalClassesMode && (
+        <AdditionalClassesPanel
+          existingAppts={acExistingAppts}
+          currentRecordId={record?.id}
+          acCount={acCount}
+          setAcCount={(n) => { setAcCount(n); if (acActiveDraft >= n) setAcActiveDraft(n - 1); }}
+          acActiveDraft={acActiveDraft}
+          setAcActiveDraft={setAcActiveDraft}
+          acOrderedDrafts={acOrderedDrafts}
+          acDraftOrderByIdx={acDraftOrderByIdx}
+          acDraftConflicts={acDraftConflicts}
+          acDraftWarnings={acDraftWarnings}
+          acActiveDraftConflicts={acActiveDraftConflicts}
+          acActiveDraftWarnings={acActiveDraftWarnings}
+          acActiveDraftConflictByField={acActiveDraftConflictByField}
+          acActiveDraftWarningByField={acActiveDraftWarningByField}
+          getAcMergedDraftValues={getAcMergedDraftValues}
+          refData={refData}
+          courseFlags={courseFlags}
+          courseLengthSec={courseLengthSec}
+          onFieldChange={(field, value) => {
+            setAcDraftOverrides((prev) => ({
+              ...prev,
+              [acActiveDraft]: { ...(prev[acActiveDraft] ?? {}), [field]: value },
+            }));
+          }}
+          onSubmit={onAdditionalClassesSubmit}
+          isSubmitting={acSubmitting}
+        />
+      )}
     </div>
   );
 }
@@ -851,7 +1397,7 @@ export default function AppointmentForm({ record, prefill, refData, onClose, sta
 // ─── BulkDraftPanel ───────────────────────────────────────────────────────────
 // Renders a draft's fields as controlled inputs (no react-hook-form for simplicity).
 
-function BulkDraftPanel({ draftIndex, values, refData, courseFlags, courseLengthSec, conflictByField = {}, warningByField = {}, onFieldChange }) {
+function BulkDraftPanel({ draftIndex, draftOrder, values, refData, courseFlags, courseLengthSec, conflictByField = {}, warningByField = {}, onFieldChange }) {
   const { isInCar, isClassroom, tierOptions, locOptions, spanishOffered, pudoOffered } = courseFlags;
   const v = values;
 
@@ -871,8 +1417,8 @@ function BulkDraftPanel({ draftIndex, values, refData, courseFlags, courseLength
   return (
     <div className="space-y-2">
       <p className="text-xs text-muted-foreground">
-        Draft {draftIndex + 1} — date shifts +{draftIndex} week{draftIndex !== 1 ? "s" : ""} from base.
-        Changes here only affect this draft.
+        Draft {draftOrder} (source {draftIndex + 1}).
+        Drafts are auto-ordered chronologically as dates/times change.
       </p>
       <div className="grid grid-cols-2 gap-4">
 
@@ -981,6 +1527,159 @@ function BulkDraftPanel({ draftIndex, values, refData, courseFlags, courseLength
           <Input placeholder="Optional notes..." {...field("Notes")} />
         </div>
 
+      </div>
+    </div>
+  );
+}
+
+// ─── AdditionalClassesPanel ───────────────────────────────────────────────────
+// Shown below the edit form when "Additional Classes" is active.
+// Displays existing appointments for the student+course as read-only context,
+// then lets the user add and configure new draft appointments.
+
+function AdditionalClassesPanel({
+  existingAppts,
+  currentRecordId,
+  acCount,
+  setAcCount,
+  acActiveDraft,
+  setAcActiveDraft,
+  acOrderedDrafts,
+  acDraftOrderByIdx,
+  acDraftConflicts,
+  acDraftWarnings,
+  acActiveDraftConflicts,
+  acActiveDraftWarnings,
+  acActiveDraftConflictByField,
+  acActiveDraftWarningByField,
+  getAcMergedDraftValues,
+  refData,
+  courseFlags,
+  courseLengthSec,
+  onFieldChange,
+  onSubmit,
+  isSubmitting,
+}) {
+  return (
+    <div className="mt-4 border-t pt-4 space-y-4">
+      <p className="text-sm font-semibold">Additional Classes</p>
+
+      {/* Existing appointments list */}
+      {existingAppts.length > 0 ? (
+        <div className="space-y-1">
+          <p className="text-xs text-muted-foreground uppercase tracking-wide">Existing appointments</p>
+          <div className="rounded-md border divide-y text-xs">
+            {existingAppts.map((a) => {
+              const f = a.fields;
+              const isCurrent = a.id === currentRecordId;
+              const dateStr = f.Start ? format(parseISO(f.Start), "MMM d, yyyy h:mm a") : "—";
+              const instructor = fullName(refData.instructorMap[f.Instructor?.[0]]);
+              const classNum = f["Class Number"] ? `#${f["Class Number"]}` : "";
+              return (
+                <div
+                  key={a.id}
+                  className={"flex items-center gap-2 px-3 py-1.5 " + (isCurrent ? "bg-muted/60" : "")}
+                >
+                  {classNum && <span className="font-medium text-muted-foreground w-6 shrink-0">{classNum}</span>}
+                  <span className="flex-1 truncate">{dateStr}</span>
+                  <span className="text-muted-foreground truncate">{instructor}</span>
+                  {isCurrent && <span className="text-xs text-primary font-medium ml-1">← this</span>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground italic">No existing appointments for this student + course.</p>
+      )}
+
+      {/* New drafts */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">Add:</span>
+          <Input
+            type="number"
+            min={1}
+            max={20}
+            value={acCount}
+            onChange={(e) => setAcCount(Math.max(1, Math.min(20, Number(e.target.value))))}
+            className="w-16 h-7 text-xs"
+          />
+          <span className="text-xs text-muted-foreground">new appointments, +1 week each</span>
+        </div>
+
+        {/* Draft tabs */}
+        <div className="flex gap-1 flex-wrap">
+          {acOrderedDrafts.map((entry, orderIdx) => {
+            const i = entry.idx;
+            const vals = getAcMergedDraftValues(i);
+            const hasDraftConflict = !!(acDraftConflicts[i]?.length);
+            const hasDraftWarning  = !hasDraftConflict && !!(acDraftWarnings[i]?.length);
+            const hasOverride = true; // all AC drafts are new
+            return (
+              <button
+                key={i}
+                type="button"
+                onClick={() => setAcActiveDraft(i)}
+                className={
+                  "px-2.5 py-0.5 rounded text-xs font-medium border transition-colors " +
+                  (acActiveDraft === i
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : hasDraftConflict
+                    ? "bg-destructive/10 border-destructive text-destructive hover:bg-destructive/20"
+                    : hasDraftWarning
+                    ? "bg-amber-50 border-amber-400 text-amber-800 hover:bg-amber-100"
+                    : "bg-background border-border text-muted-foreground hover:bg-muted")
+                }
+              >
+                {orderIdx + 1}
+                {hasDraftConflict && <span className="ml-0.5">!</span>}
+                {hasDraftWarning  && <span className="ml-0.5">~</span>}
+                {vals.startDate && <span className="ml-1 opacity-70">{vals.startDate.slice(5)}</span>}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Active draft conflict/warning banners */}
+        {acActiveDraftConflicts.length > 0 && (
+          <div className="rounded-md bg-destructive/10 border border-destructive/30 px-3 py-2 space-y-1">
+            {acActiveDraftConflicts.map((c) => (
+              <p key={c.type} className="text-xs text-destructive font-medium">{c.message}</p>
+            ))}
+          </div>
+        )}
+        {acActiveDraftWarnings.length > 0 && (
+          <div className="rounded-md bg-amber-50 border border-amber-300 px-3 py-2 space-y-1">
+            {acActiveDraftWarnings.map((w) =>
+              w.message.split("\n").map((line, i) => (
+                <p key={w.type + i} className="text-xs text-amber-700 font-medium">{line}</p>
+              ))
+            )}
+          </div>
+        )}
+
+        {/* Active draft fields */}
+        <BulkDraftPanel
+          key={acActiveDraft}
+          draftIndex={acActiveDraft}
+          draftOrder={acDraftOrderByIdx[acActiveDraft] ?? (acActiveDraft + 1)}
+          values={getAcMergedDraftValues(acActiveDraft)}
+          overrides={{}}
+          refData={refData}
+          courseFlags={courseFlags}
+          courseLengthSec={courseLengthSec}
+          conflictByField={acActiveDraftConflictByField}
+          warningByField={acActiveDraftWarningByField}
+          onFieldChange={onFieldChange}
+        />
+      </div>
+
+      {/* Submit */}
+      <div className="flex justify-end gap-2 pt-2 border-t">
+        <Button type="button" onClick={onSubmit} disabled={isSubmitting}>
+          {isSubmitting ? "Creating..." : "Create " + acCount + " Additional Appointment" + (acCount !== 1 ? "s" : "")}
+        </Button>
       </div>
     </div>
   );

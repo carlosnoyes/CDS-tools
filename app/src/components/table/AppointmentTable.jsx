@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { fullName } from "@/hooks/useReferenceData";
 import {
   Table,
   TableBody,
@@ -31,8 +32,8 @@ function getSort(appt, key, maps) {
   switch (key) {
     case "start": return f.Start ?? "";
     case "end": return f.End ?? "";
-    case "student": return maps.studentMap[f.Student?.[0]]?.["Full Name"] ?? "";
-    case "instructor": return maps.instructorMap[f.Instructor?.[0]]?.["Full Name"] ?? "";
+    case "student": return fullName(maps.studentMap[f.Student?.[0]]);
+    case "instructor": return fullName(maps.instructorMap[f.Instructor?.[0]]);
     case "vehicle": return maps.vehicleMap[f.Car?.[0]]?.["Car Name"] ?? "";
     case "course": return (f["Name (from Course)"] ?? [])[0] ?? "";
     case "classNumber": return f["Class Number"] ?? 0;
@@ -97,10 +98,8 @@ export default function AppointmentTable({ appointments, refData, onEdit }) {
             const f = appt.fields;
             const instructorId = f.Instructor?.[0];
             const color = instructorColor(instructorId);
-            const instructorName =
-              refData.instructorMap[instructorId]?.["Full Name"] ?? "—";
-            const studentName =
-              refData.studentMap[f.Student?.[0]]?.["Full Name"] ?? "—";
+            const instructorName = fullName(refData.instructorMap[instructorId]);
+            const studentName = fullName(refData.studentMap[f.Student?.[0]]);
             const vehicleName =
               refData.vehicleMap[f.Car?.[0]]?.["Car Name"] ?? "—";
             const courseName = (f["Name (from Course)"] ?? [])[0] ?? "—";

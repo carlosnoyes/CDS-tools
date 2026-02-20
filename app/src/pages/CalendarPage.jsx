@@ -72,14 +72,14 @@ export default function CalendarPage() {
     } catch { /* ignore invalid dates */ }
   }
 
-  // Zoom mode — null | "vertical" | "horizontal"
+  // Zoom mode — null | "horizontal"
   const [zoomMode, setZoomMode] = useState(null);
 
-  function handleVerticalZoom(delta) {
-    setPxPerHour((prev) => Math.max(20, Math.min(600, prev - delta * 12)));
-  }
   function handleHorizontalZoom(delta) {
     setDayColWidth((prev) => Math.max(60, Math.min(1200, prev - delta * 20)));
+  }
+  function handleVerticalResize(newPxPerHour) {
+    setPxPerHour(Math.max(20, Math.min(600, newPxPerHour)));
   }
   function exitZoom() {
     setZoomMode(null);
@@ -135,7 +135,7 @@ export default function CalendarPage() {
           onAnchorChange={setAnchor}
           onEdit={openEdit}
           onCreateAt={openCreate}
-          onVerticalZoom={handleVerticalZoom}
+          onVerticalResize={handleVerticalResize}
           onHorizontalZoom={handleHorizontalZoom}
           onGutterResize={handleGutterResize}
           onColResize={handleColResize}

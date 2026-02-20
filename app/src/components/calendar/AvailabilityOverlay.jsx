@@ -1,5 +1,6 @@
 import { DAY_START_HOUR, HOUR_LABELS } from "@/utils/time";
 import { instructorColor } from "@/utils/colors";
+import { fullName } from "@/hooks/useReferenceData";
 
 /**
  * Renders translucent instructor-colored strips behind appointment blocks.
@@ -35,8 +36,7 @@ export default function AvailabilityOverlay({ intervals, pxPerHour, refData, dat
         const topPx = (clampedStart - DAY_START_HOUR) * pxPerHour;
         const heightPx = (clampedEnd - clampedStart) * pxPerHour;
 
-        const instructorName =
-          refData?.instructorMap?.[iv.instructorId]?.["Full Name"] ?? "Unknown";
+        const instructorName = fullName(refData?.instructorMap?.[iv.instructorId]);
         const vehicleName =
           iv.vehicleId
             ? (refData?.vehicleMap?.[iv.vehicleId]?.["Car Name"] ?? "Unknown Car")

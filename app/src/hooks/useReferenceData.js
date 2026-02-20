@@ -13,12 +13,20 @@ function toMap(records) {
   return Object.fromEntries(records.map((r) => [r.id, r.fields]));
 }
 
+export function fullName(fields) {
+  return [fields?.["First Name"], fields?.["Last Name"]].filter(Boolean).join(" ") || "?";
+}
+
+export function courseLabel(fields) {
+  return [fields?.["Abreviation"], fields?.["Name"]].filter(Boolean).join(" - ") || "?";
+}
+
 // Build a dropdown options array [{value: recId, label: string}]
-function toOptions(records, labelField) {
+function toOptions(records, labelFn) {
   if (!records) return [];
   return records.map((r) => ({
     value: r.id,
-    label: r.fields[labelField] ?? r.id,
+    label: labelFn(r.fields),
   }));
 }
 
@@ -52,10 +60,10 @@ export function useReferenceData() {
   const vehicleMap    = useMemo(() => toMap(vehicles.data),    [vehicles.data]);
   const courseMap     = useMemo(() => toMap(courses.data),     [courses.data]);
 
-  const instructorOptions = useMemo(() => toOptions(instructors.data, "Full Name"), [instructors.data]);
-  const studentOptions    = useMemo(() => toOptions(students.data, "Full Name"),    [students.data]);
-  const vehicleOptions    = useMemo(() => toOptions(vehicles.data, "Car Name"),     [vehicles.data]);
-  const courseOptions     = useMemo(() => toOptions(courses.data, "Lookup"),         [courses.data]);
+  const instructorOptions = useMemo(() => toOptions(instructors.data, fullName),                    [instructors.data]);
+  const studentOptions    = useMemo(() => toOptions(students.data,    fullName),                    [students.data]);
+  const vehicleOptions    = useMemo(() => toOptions(vehicles.data,    (f) => f["Car Name"] ?? "?"), [vehicles.data]);
+  const courseOptions     = useMemo(() => toOptions(courses.data,     courseLabel),                 [courses.data]);
 
   const isLoading =
     instructors.isLoading ||

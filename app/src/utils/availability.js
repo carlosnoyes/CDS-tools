@@ -1,4 +1,4 @@
-import { parseISO, addWeeks, isBefore, isAfter, isSameDay, getDay } from "date-fns";
+import { parseISO, isBefore, isAfter, isSameDay, getDay } from "date-fns";
 
 /**
  * Given all availability records from Airtable, return the set of active
@@ -9,7 +9,11 @@ import { parseISO, addWeeks, isBefore, isAfter, isSameDay, getDay } from "date-f
  * Algorithm:
  * 1. Collect all "Scheduled" records whose recurrence includes targetDate
  * 2. Collect all "Blocked Off" records whose recurrence includes targetDate
- * 3. Subtract blocked windows from scheduled windows per instructor+vehicle
+ * 3. Subtract blocked windows from scheduled windows using scoped matching:
+ *    - instructor+vehicle block: exact pair
+ *    - instructor-only block: that instructor across all vehicles
+ *    - vehicle-only block: that vehicle across all instructors
+ *    - blank+blank block: ignored (no-op)
  */
 export function expandAvailability(records, targetDate) {
   const scheduled = [];
@@ -36,17 +40,41 @@ export function expandAvailability(records, targetDate) {
     if (status === "Blocked Off")  blocked.push(entry);
   }
 
-  // Subtract blocked intervals from scheduled intervals (same instructor+vehicle)
+  // Subtract blocked intervals from scheduled intervals using block scope rules.
   const result = [];
   for (const s of scheduled) {
     const applicableBlocks = blocked.filter(
-      (b) => b.instructorId === s.instructorId && b.vehicleId === s.vehicleId
+      (b) => blockAppliesToScheduled(b, s)
     );
     const slices = subtractBlocks([s], applicableBlocks);
     result.push(...slices);
   }
 
   return result;
+}
+
+/**
+ * Returns true when a blocked interval applies to a scheduled interval.
+ *
+ * Scope rules:
+ * - instructor+vehicle set: exact pair match
+ * - instructor-only: match instructor, any vehicle
+ * - vehicle-only: match vehicle, any instructor
+ * - both missing: invalid/no-op (never matches)
+ */
+function blockAppliesToScheduled(block, scheduled) {
+  const hasInstructor = Boolean(block.instructorId);
+  const hasVehicle = Boolean(block.vehicleId);
+
+  if (!hasInstructor && !hasVehicle) return false;
+  if (hasInstructor && hasVehicle) {
+    return (
+      block.instructorId === scheduled.instructorId &&
+      block.vehicleId === scheduled.vehicleId
+    );
+  }
+  if (hasInstructor) return block.instructorId === scheduled.instructorId;
+  return block.vehicleId === scheduled.vehicleId;
 }
 
 /**

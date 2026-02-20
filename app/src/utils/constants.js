@@ -61,6 +61,27 @@ export const APPT_FIELDS = {
   pudo:         "fld6nShioyE8NGlKH",  // duration (seconds): null, 1800 (30 min), 3600 (60 min)
 };
 
+// Students field IDs
+export const STUDENT_FIELDS = {
+  firstName:         "fldAyjsGGXkg72xfC",  // singleLineText
+  lastName:          "fldAb8QMpEQI7INWU",  // singleLineText
+  phone:             "fldC7mwK6qHNlJojs",  // phoneNumber
+  email:             "fldGLUgpK7OhK09hf",  // email
+  address:           "fldf1aK38wvLlWi0o",  // singleLineText
+  teen:              "fldMZsgc6M6tjSM4N",  // checkbox
+  guardianFirstName: "fld1MkpVvhEpNM5Yx",  // singleLineText
+  guardianLastName:  "fldil8hf91KCEJiw4",  // singleLineText
+  guardianRelation:  "fldbWdPSN5Nev2blX",  // singleLineText
+  guardianPhone:     "fld6WORo9bVhoV0Js",  // phoneNumber
+  guardianEmail:     "fldVn5HpMzAIi1a13",  // email
+  // Read-only
+  fullName:          "fldWUXq0QsdYjc1Jt",  // formula: First & " " & Last
+  appointments:      "fldcMrrWus0qxba8i",  // multipleRecordLinks → Schedule
+  recordId:          "fld4T1EeyMJhy5PdE",  // formula
+  created:           "fldXMa8koP1LCwQZj",  // createdTime
+  lastModified:      "fldYo3mtE2C4ElMyO",  // lastModifiedTime
+};
+
 export const CLASSROOMS = ["Class Room 1", "Class Room 2"];
 export const PUDO_OPTIONS = ["0:30", "1:00"];
 export const LOCATION_LABELS = { CH: "Colonial Heights", GA: "Glen Allen" };
