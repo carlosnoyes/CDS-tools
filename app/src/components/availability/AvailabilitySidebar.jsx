@@ -6,18 +6,13 @@ export default function AvailabilitySidebar({
   record,
   prefill,
   refData,
-  mode,
+  availabilityRecords,
   onClose,
-  onDelete,
 }) {
   if (!open) return null;
 
   const isEdit = !!record;
-  const title = isEdit
-    ? `Edit ${record.fields.Status === "Blocked Off" ? "Block" : "Availability"}`
-    : prefill?.status === "Blocked Off"
-    ? "New Block"
-    : "New Availability";
+  const title = isEdit ? "Edit Availability" : "Add Availability";
 
   return (
     <div
@@ -27,24 +22,13 @@ export default function AvailabilitySidebar({
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b shrink-0">
         <span className="text-sm font-semibold">{title}</span>
-        <div className="flex items-center gap-1">
-          {isEdit && (
-            <button
-              onClick={onDelete}
-              className="rounded p-1 hover:bg-destructive/10 text-destructive transition-colors"
-              title="Delete"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
-          )}
-          <button
-            onClick={onClose}
-            className="rounded p-1 hover:bg-muted transition-colors"
-            title="Close"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+        <button
+          onClick={onClose}
+          className="rounded p-1 hover:bg-muted transition-colors"
+          title="Close"
+        >
+          <X className="w-4 h-4" />
+        </button>
       </div>
 
       {/* Scrollable form body */}
@@ -53,7 +37,7 @@ export default function AvailabilitySidebar({
           record={record}
           prefill={prefill}
           refData={refData}
-          mode={mode}
+          availabilityRecords={availabilityRecords}
           onClose={onClose}
         />
       </div>

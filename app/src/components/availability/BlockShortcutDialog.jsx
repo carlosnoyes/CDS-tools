@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { addDays, parseISO, getDay, format } from "date-fns";
+import { addDays, parseISO, format } from "date-fns";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -44,58 +44,34 @@ export default function BlockShortcutDialog({
   }
 
   /**
-   * For Block Instructor: find which days in the range the instructor has Scheduled
-   * availability, then create a Blocked Off record for each.
+   * For Block Instructor: find all Scheduled records for this instructor
+   * whose Start date falls within the selected range, then create a matching
+   * Blocked Off record for each.
    */
   function computeInstructorBlocks() {
     if (!resourceId || !startDate || !endDate) return [];
     const start = new Date(startDate + "T00:00:00");
-    const end = new Date(endDate + "T00:00:00");
+    const end = new Date(endDate + "T23:59:59");
 
-    // Get all Scheduled records for this instructor
+    // Find standalone Scheduled records for this instructor in the date range
     const scheduled = (availabilityRecords ?? []).filter((r) => {
       const f = r.fields;
-      return f.Status === "Scheduled" && f.Instructor?.[0] === resourceId;
+      if (f.Status !== "Scheduled" || f.Instructor?.[0] !== resourceId) return false;
+      if (!f.Start || !f["Shift Length"]) return false;
+      const recDate = parseISO(f.Start);
+      return recDate >= start && recDate <= end;
     });
 
-    const blocks = [];
-    let day = start;
-    while (day <= end) {
-      const targetDow = getDay(day);
-      for (const rec of scheduled) {
-        const f = rec.fields;
-        if (!f.Start || !f["Shift Length"]) continue;
-        const anchor = parseISO(f.Start);
-        if (getDay(anchor) !== targetDow) continue;
-
-        // Check cadence/repeat bounds
-        const repeateUntil = f["Repeate Until"] ? parseISO(f["Repeate Until"]) : null;
-        if (repeateUntil && day > repeateUntil) continue;
-        if (day < anchor && day.toDateString() !== anchor.toDateString()) continue;
-
-        if ((f.Cadence ?? "Weekly") === "Bi-Weekly") {
-          const anchorMs = new Date(anchor).setHours(0, 0, 0, 0);
-          const targetMs = new Date(day).setHours(0, 0, 0, 0);
-          const weeksDiff = Math.round((targetMs - anchorMs) / (7 * 86_400_000));
-          if (weeksDiff % 2 !== 0) continue;
-        }
-
-        const blockStart = new Date(day);
-        blockStart.setHours(anchor.getHours(), anchor.getMinutes(), 0, 0);
-
-        blocks.push({
-          Status: "Blocked Off",
-          Instructor: [resourceId],
-          ...(f.Vehicle?.[0] ? { Vehicle: [f.Vehicle[0]] } : {}),
-          Start: blockStart.toISOString(),
-          "Shift Length": f["Shift Length"],
-          Cadence: "Weekly",
-          "Repeate Until": format(day, "yyyy-MM-dd"),
-        });
-      }
-      day = addDays(day, 1);
-    }
-    return blocks;
+    return scheduled.map((rec) => {
+      const f = rec.fields;
+      return {
+        Status: "Blocked Off",
+        Instructor: [resourceId],
+        ...(f.Vehicle?.[0] ? { Vehicle: [f.Vehicle[0]] } : {}),
+        Start: f.Start,
+        "Shift Length": f["Shift Length"],
+      };
+    });
   }
 
   /**
@@ -116,8 +92,6 @@ export default function BlockShortcutDialog({
         Vehicle: [resourceId],
         Start: blockStart.toISOString(),
         "Shift Length": 46800, // 8am-9pm = 13 hours
-        Cadence: "Weekly",
-        "Repeate Until": format(day, "yyyy-MM-dd"),
       });
       day = addDays(day, 1);
     }

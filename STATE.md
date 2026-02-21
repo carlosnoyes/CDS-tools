@@ -4,17 +4,43 @@
 
 ## Current Focus
 
-- React/Vite appointment tool in `app/` — Airtable layer dramatically restructured (2026-02-19)
-- All Airtable modules now live in `app/src/airtable/`: appointments, courses, instructors, students, vehicles, client
-- Constants centralized in `app/src/utils/constants.js`: `BASE_ID`, `TABLES`, `APPT_FIELDS`, `LOCATIONS`, `INSTRUCTOR_ORDER`
-- Root-level `package.json`, `package-lock.json`, and all `scripts/` were deleted (moved into `app/`)
+- React/Vite appointment scheduling tool in `app/` — fully built through Phase 27
+- Four views: Calendar, Table, Students, Availability
 - Run: `cd app && npm run dev`
+- **Next work:** Phase 20 — Scoped Block Off Overrides (Instructor-Only / Car-Only)
+
+## App Structure
+
+```
+app/src/
+  pages/         CalendarPage, TablePage, StudentsPage, AvailabilityPage
+  components/
+    layout/      AppShell (nav tabs)
+    calendar/    WeekCalendar, CalendarGrid, DayColumn, DayPopout, AppointmentBlock,
+                 AvailabilityOverlay, TimeGutter, WeekNav
+    form/        AppointmentForm, AppointmentModal, AppointmentSidebar,
+                 LinkedSelect, DeleteButton
+    table/       AppointmentTable, TableFilters
+    students/    StudentForm
+    availability/ AvailabilityForm, AvailabilityGrid, AvailabilityBlock,
+                  AvailabilitySidebar, AvailabilityToolbar, ResourceColumn,
+                  BlockShortcutDialog
+    ui/          shadcn components (button, dialog, table, select, input, label, badge, sonner)
+  airtable/      client.js, appointments.js, courses.js, instructors.js,
+                 students.js, vehicles.js, availability.js
+  hooks/         useAppointments.js, useReferenceData.js, useAvailability.js,
+                 useAvailabilityMutations.js
+  utils/         constants.js, colors.js, time.js, overlap.js, conflicts.js,
+                 availability.js, availabilityView.js
+  lib/           utils.js (shadcn)
+```
 
 ## Current Decisions
 
 - Repository uses `main` as the default branch
-- Project is in early stages; structure is being established
-- Primary data store is Airtable (base: `appfmh7j77kCe8hy2`, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#airtable-base) for full schema)
+- Primary data store is Airtable (base: `appfmh7j77kCe8hy2`)
+- No backend server — Airtable API called directly from browser
+- API key in `app/.env` as `VITE_AIRTABLE_API_KEY`
 
 ## Airtable Quick Reference
 
@@ -23,82 +49,64 @@
 | Base name | Colonial Driving School - Carlos |
 | Base ID | `appfmh7j77kCe8hy2` |
 | API key env var | `VITE_AIRTABLE_API_KEY` (in `app/.env`) |
-| Active (new) tables | Students, Courses, Services, Prices, Sales, Schedule, Instructors, Cars, Availability |
-| Fully built tables | Students, Courses, Services, Prices, Schedule, Instructors, Cars, Availability |
-| Stub-only tables | Sales (base 3 fields only) |
-| Legacy (operational) tables | Students - Old, Courses - Old, Emails - Old |
-| Template Table | `tblsF8RF9pA0ndM3P` — do not delete; source for duplicating new tables |
-| Services table ID | `tbl7hzYhb2kHDE7dg` |
-| Availability table ID | `tbl5db09IrQR5rmgU` — 13 fields (Record ID, Instructor, Vehicle, Status, Day of Week, Start, Shift Length, End, Notes, Repeate Until, Cadence, Created, Last Modified) |
-| Note | "Appointments" table renamed to "Schedule"; "Vehicles" table renamed to "Cars"; Emails table removed from base |
-| Note | All new tables duplicated from Template Table; have Record ID, Created, Last Modified by default |
-| **Last synced** | 2026-02-20 |
+| Active tables | Schedule, Courses, Students, Instructors, Cars, Availability, Services, Prices, Sales |
+| Legacy tables | Students - Old, Courses - Old, Emails - Old |
+| Template Table | `tblsF8RF9pA0ndM3P` — do not delete |
+| **Last synced** | 2026-02-21 (live API) |
 | Full schema | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#airtable-base) |
 
-## Availability — Schema (rebuilt 2026-02-18)
+## Table IDs
 
-- `Status` field: "Scheduled" or "Blocked Off" (replaces old `Type` field)
-- `Cadence` field: "Weekly" or "Bi-Weekly" (replaces old `Week` field)
-- `Repeate Until` field: date — last date the recurrence applies (note: "Repeate" typo is in Airtable)
-- Shift timing: `Start` (dateTime) + `Shift Length` (duration) => `End` (formula) — field names in Airtable are "Start"/"End", not "Shift Start"/"Shift End"
-- `Day of Week`: formula field derived from `Start`, not a select
-- `Vehicle` link added — Availability can be linked to a vehicle as well as an instructor
-- Old `Week 1`/`Week 2` bi-weekly anchor approach may still apply in scheduling logic but is no longer encoded as a field value
+| Table | ID |
+|-------|----|
+| Schedule | `tblo5X0nETYrtQ6bI` |
+| Courses | `tblthPfZN6r0FCD9P` |
+| Students | `tblpG4IVPaS8tq4bp` |
+| Instructors | `tblwm92MbaoRT2dSa` |
+| Cars | `tblog7VBOinu5eVqp` |
+| Availability | `tbl5db09IrQR5rmgU` |
+| Services | `tbl7hzYhb2kHDE7dg` |
+| Prices | `tblDZMwgA9Ay0JbRA` |
+| Sales | `tbl0aRT60VhcLq06G` |
 
-## Schedule — Schema (updated 2026-02-20)
+## Schema Notes (verified 2026-02-21)
 
-> Table renamed from "Appointments" to "Schedule" in Airtable (ID unchanged: `tblo5X0nETYrtQ6bI`). "Vehicle" link field renamed to "Car" (singular).
+### Instructors
+- `Spanish` (`fldd71WcnVHnEp6tP`, checkbox) — whether instructor is Spanish-capable
+- `Tiers` (`fldk75KnmivXoYgm9`, multipleSelects) — capability tiers (EL, RL, etc.)
+- **Note:** `Capabilities` multipleSelect field is gone — replaced by separate `Spanish` and `Tiers` fields
 
-- Links: Student, Instructor, Car, Course (all multipleRecordLinks)
-- Timing: `Start` (dateTime) + Course `Length` (lookup) + `PUDO` (duration) => `End` (formula)
-- `PUDO` is a duration field (h:mm format, e.g. 0:30 or 1:00), NOT a singleSelect — duration math used in formulas
-- `PUDO` is added twice (pickup + dropoff) in the End formula: `{PUDO}/60` gives minutes
-- `Pickup At` and `Dropoff At` are new formula fields computing those datetimes from Start/End + PUDO
-- `Location`: "CH" (Colonial Heights) or "GA" (Glen Allen) — values changed from full names to abbreviations
-- `Classroom`: new singleSelect — "Class Room 1" or "Class Room 2"
-- `Age`, `Tier`, `Spanish`, `PUDO` (schedule-level): new singleSelect/checkbox fields set per appointment
-- Corresponding `**(from Course)**` lookup fields pull allowed values from linked course
-- `Abreviation`: auto-formula combining Instructor + Student + Car + Course + Class Number
-- `Canceled` (`fld4sG95vpTu5jnbk`, checkbox): whether the appointment was canceled — added 2026-02-20
-- `No Show` (`fldhYZ5TjHhDI8WVy`, checkbox): whether the student was a no-show — added 2026-02-20
+### Availability
+- `Location` (`fld3hPPZq6RjQfEHo`, singleSelect) — "CH" or "GA"
+- `Status` ("Scheduled" / "Blocked Off"), `Cadence` ("Weekly" / "Bi-Weekly")
+- `Repeate Until` — typo is baked into Airtable
+- `Start` + `Shift Length` + `End` (formula) — not "Shift Start"/"Shift End"
 
-## Prices — Schema (updated 2026-02-19)
+### Schedule
+- `Canceled` (`fld4sG95vpTu5jnbk`, checkbox), `No Show` (`fldhYZ5TjHhDI8WVy`, checkbox)
+- `PUDO` stored as seconds (1800 = 30 min, 3600 = 60 min)
+- `Location`: "CH" or "GA" (abbreviated, not full names)
+- `Classroom`: "Class Room 1" or "Class Room 2"
+- `Car` link field (singular) — not "Vehicle"
 
-- Links to either Courses OR Services (mutually exclusive per record)
-- `Bundled` (number): quantity of sessions included (1 = single, >1 = bundle)
-- `Walk In` (checkbox): walk-in rate flag
-- `Online` (checkbox): online rate flag — new field added
-- `Version` and `Expires On` and `Unique Abreviation` fields were removed from the live base
+### Field Name Typos Baked into Airtable
+- `"Abreviation"` (not Abbreviation) — on Schedule, Courses, Services, Prices
+- `"Repeate Until"` (not Repeat) — on Availability
+- `"Serivces Abreviation"` (not Services) — on Prices
 
-## Courses — Schema (updated 2026-02-20)
+## Key Constants (`app/src/utils/constants.js`)
 
-- Old checkboxes (`Classroom`, `In Car`, `Online`) removed
-- Now has `Type` singleSelect ("In Car" / "Classroom") instead
-- Fields: `Teen Distinct` (checkbox), `Tier Options` (multipleSelects: S/EL/RL), `Location Options` (multipleSelects: CH/GA), `Spanish Offered` (checkbox), `PUDO Offered` (checkbox), `Additional Requirements` (multilineText), `Numbered` (checkbox)
-- `Lookup` formula field: `{Abreviation} & " - " & {Name}` — combined display string
-- Note: `Age Options` (multipleSelects T/A) was removed; replaced by `Teen Distinct` (checkbox) on the Course and `Teen` (checkbox) on Students
-- Note: field is named "Location Options" (not "Locations Options") in Airtable
-
-## Students — Schema (updated 2026-02-20)
-
-- `Guardian Relation` (`fldbWdPSN5Nev2blX`, singleLineText) — between Guardian Last Name and Guardian Phone
-- `Teen` (`fldMZsgc6M6tjSM4N`, checkbox) — between Guardian Email and Address
-
-## Open Questions
-
-- [ ] What language/runtime will the tools be built with?
-- [ ] What is the first tool to build?
-- [ ] What CI/CD platform to use?
-
-## Next Milestones
-
-- [ ] Define first tool and its scope
-- [ ] Set up CI pipeline
-- [ ] Add initial test infrastructure
+- `BASE_ID`, `TABLES` — all table IDs
+- `APPT_FIELDS` — Schedule field IDs (writable + read-only clearly labeled)
+- `STUDENT_FIELDS` — Students field IDs
+- `AVAIL_FIELDS` — Availability field names (stored by name, not ID)
+- `INSTRUCTOR_ORDER` — stable instructor record ID array for color assignment
+- `LOCATION_LABELS` — `{ CH: "Colonial Heights", GA: "Glen Allen" }`
+- `CLASSROOMS` — `["Class Room 1", "Class Room 2"]`
+- `PUDO_OPTIONS` — `["0:30", "1:00"]`
 
 ## Last Verified Commands
 
 | Command | Status | Date |
 |---------|--------|------|
-| `git status` | Working | 2026-02-18 |
-| <!-- TODO: test command --> | <!-- TODO --> | <!-- TODO --> |
+| `cd app && npm run dev` | Working | 2026-02-21 |

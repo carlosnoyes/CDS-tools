@@ -1,6 +1,6 @@
 # Scheduling Tool — Logic Reference
 
-> Authoritative reference for the CDS appointment scheduling tool. Organized into three layers: what Airtable owns, what the UI owns, and how they communicate.
+> Authoritative reference for the CDS appointment scheduling tool. Organized into three layers: what Airtable owns, what the UI owns, and how they communicate. Last updated: 2026-02-21.
 
 ---
 
@@ -112,7 +112,10 @@ These four tables supply the dropdown options in the form. The app only reads fr
 | First Name | Available in map |
 | Last Name | Available in map |
 | Role | Available in map |
-| Capabilities | Available in map |
+| Spanish | W5 capability check (checkbox: `true` = Spanish-capable) |
+| Tiers | W6 capability check (multipleSelects: e.g. `["EL", "RL"]`) |
+
+> **Note:** The old `Capabilities` multipleSelect field has been removed from Airtable. Spanish and tier capability are now stored as separate fields. The `instructors.js` module fetches `["First Name", "Last Name", "Role", "Spanish", "Tiers"]`.
 
 A fixed list of 14 instructor record IDs in `INSTRUCTOR_ORDER` (in [constants.js](../app/src/utils/constants.js)) ensures each instructor gets a **stable color** that never shifts between sessions.
 
@@ -224,24 +227,27 @@ The calendar visually indicates when each instructor (and their paired car) is a
 
 **Data source:** Availability table (`tbl5db09IrQR5rmgU`). Fetched alongside appointments, cached 2 minutes (availability changes infrequently but should reflect recent edits within a short session).
 
-**Recurrence expansion:** Availability records repeat on a cadence (`Weekly` or `Bi-Weekly`) from their `Start` date up through `Repeate Until`. The UI expands recurrences client-side for the current view window only — it does not fetch all future records.
+**Data model:** Each availability record is a standalone shift with an explicit `Start` datetime and `Shift Length`. There is no recurrence expansion needed — each record represents exactly one shift on one day.
 
-**Algorithm:**
+**Algorithm** (implemented in `app/src/utils/availability.js` → `expandAvailability()`):
+
 1. For each availability record with `Status = "Scheduled"`:
-   - Check if any occurrence of the record's cadence falls on the target date (match by day-of-week, within the recurrence window)
-   - If yes, add `{ instructorId, vehicleId, location, shiftStart, shiftEnd }` to the available slots for that day
+   - Check whether the record's `Start` date matches the target date
+   - If yes, compute `startMs`/`endMs` from the record's Start and Shift Length, and add `{ instructorId, vehicleId, location, startMs, endMs }` to the scheduled list
 2. For each availability record with `Status = "Blocked Off"`:
-   - Same recurrence check
-   - If yes, subtract that time range from matching `Scheduled` slots using block scope:
-     - If **Instructor and Vehicle are both set**: block only that instructor+vehicle pairing
-     - If **Instructor is set and Vehicle is blank**: block that instructor across all vehicles
-     - If **Vehicle is set and Instructor is blank**: block that vehicle across all instructors
-     - If **both are blank**: invalid/no-op (ignored by scheduler)
-3. Render the resulting intervals as background overlays in the calendar
+   - Same date check
+   - If yes, determine its scope from which links are set:
+     - **Instructor + Vehicle set**: block only that exact instructor+vehicle pair
+     - **Instructor set, Vehicle blank**: block that instructor across all their scheduled windows (any vehicle)
+     - **Vehicle set, Instructor blank**: block that vehicle across all scheduled windows (any instructor)
+     - **Both blank**: invalid/no-op — ignored
+3. Subtract each applicable blocked interval from the matching scheduled intervals. Partial overlaps produce before/after slices; full overlaps are dropped entirely.
+4. Return the resulting flat array of unblocked `{ instructorId, vehicleId, location, startMs, endMs }` intervals.
+5. Render the resulting intervals as background overlays in the calendar.
 
-**Blocked Off precedence (important):**
-- `Blocked Off` is an override layer and always wins over `Scheduled` availability for any overlapping time range in its scope.
-- This allows creating general exceptions without specifying both links (for example, car-only downtime or instructor-only PTO).
+**Blocked Off precedence:**
+- `Blocked Off` always wins over `Scheduled` for any overlapping time in its scope.
+- This allows instructor-wide PTO (instructor-only block) or car downtime (vehicle-only block) without having to specify both links.
 
 **Lane interaction:**
 - Availability intervals that have a car linked clip to that car's lane. Availability intervals with no car clip to the instructor's sub-lane within the shared "No Car" lane at the right.
@@ -291,7 +297,7 @@ The calendar visually indicates when each instructor (and their paired car) is a
 - Default range: today → 1 month from today
 - Date range is set via **start date** and **end date** inputs in the filter bar
 - No week navigation arrows, no Today button
-- Columns: Start, End, Student, Instructor, Vehicle, Course, #, PUDO, Location, Notes
+- Columns: Start, End, Student, Instructor, Car, Course, #, PUDO, Location, Notes
 - Click any column header to sort ascending/descending
 - Click the pencil icon on any row to edit that appointment
 
@@ -358,68 +364,135 @@ Students data in the Students view shares the same 30-minute cache used by `useR
 
 #### Availability View (`/availability`)
 
-The Availability view provides direct management of instructor/resource availability records from the Availability table (`tbl5db09IrQR5rmgU`). It uses a calendar-style time grid with resource lanes (same concept as the main calendar) and supports two modes.
+The Availability view provides direct management of instructor/resource availability records from the Availability table (`tbl5db09IrQR5rmgU`). It is an exact copy of the Calendar view's interface — same year-scroll layout, same lane structure, same zoom controls — but with all appointments removed, leaving only the availability blocks visible.
 
-##### Layout
+##### Layout — Identical to Calendar
 
-- Vertical time axis (8am–9pm), same as main calendar
-- Columns = resource lanes: Car 1 → Car 2 → ... → Car 5 → Unassigned
-- Each block shows the assigned instructor name, vehicle, location, and time range
-- Block color follows instructor color from `INSTRUCTOR_ORDER` palette
+The Availability view reuses the Calendar's entire visual system:
 
-##### Two Modes (Toolbar Toggle)
+- **Year-scroll grid**: all weeks stacked vertically, continuously scrollable (same as Calendar)
+- **Nav bar**: prev/next week arrows, week range label, Today button, `IntersectionObserver`-driven date tracking (same as Calendar)
+- **Calendar date picker**: click the date range label to jump to any date (same as Calendar)
+- **Axis zoom**: drag-to-resize column width, time gutter width; double-click for scroll-wheel zoom mode (same as Calendar)
+- **Day popout**: double-click a day column header to expand that day to full width (same as Calendar)
+- **Time axis**: 8 AM – 9 PM vertical, same `PX_PER_HOUR` constants
+- **By Car lane layout**: Car 1 → Car N → Classrooms → Unassigned, same lane rules (only active lanes shown)
 
-**Recurring Schedule mode:**
-- Edits the base recurrence records (the default weekly template)
-- Day-of-week filter in toolbar: `Mon | Tue | Wed | Thu | Fri | Sat | Sun` — shows one day at a time
-- Blocks represent raw `Scheduled` availability records, positioned by their anchor time-of-day
-- Click/drag edits update the underlying recurrence record in Airtable
+**What's different from Calendar:**
+- **No appointment blocks** — only availability strips are rendered
+- **No appointment form** — clicking an empty slot opens the **Add Availability** form instead
+- **Clicking an availability block** opens the **Edit Availability** form (not the appointment edit form)
 
-**Week View mode:**
-- Shows a specific week's expanded availability (recurrence expanded, block-offs subtracted)
-- Week navigation arrows + date range label (same pattern as main calendar)
-- Default: 7 day sub-columns (Mon–Sun) inside each resource lane for full-week at a glance
-- Can collapse to single-day via the day filter for a zoomed-in view
-- Visual distinction: Scheduled blocks = solid colored fill; Blocked-off records = striped/hatched overlay
-- Creating new records here defaults to `Status: "Blocked Off"` (exception for a specific date)
+##### Availability Blocks
 
-##### Interactions
+Availability blocks are rendered the same way as the availability overlay in the Calendar view:
+- Translucent background wash in the instructor's color (from `INSTRUCTOR_ORDER`)
+- Inline text: instructor name, car name, location
+- Hover tooltip: instructor, car, start–end time, location
+- Blocks are positioned and sized using the same `PX_PER_HOUR` and lane-width calculations as the Calendar
 
-- **Click existing block** → sidebar form opens to edit/delete that availability record
-- **Click empty slot** → sidebar form opens to create new record (Scheduled in Recurring mode, Blocked Off in Week View)
-- **Drag top/bottom edge of block** → resize (change start time or shift length), snaps to 15-minute increments, auto-saves on mouseup
-- **Drag block body** → move to different time or resource lane (future enhancement)
+##### Add Availability Form (Sidebar)
 
-##### Availability Form (Sidebar)
+Clicking an empty time slot opens the Add Availability form as a sidebar (same pattern as the Calendar's appointment sidebar — fixed to the right side, calendar visible and scrollable behind it).
 
-The form opens as a sidebar (same pattern as appointment form). Fields:
+| Field | Input Type | Required | Notes |
+|-------|-----------|----------|-------|
+| Start | DateTime picker | **Yes** | Date + time for the first occurrence |
+| End | DateTime picker | **Yes** | Date + time for the end of the shift; must be same day as Start |
+| Instructor | LinkedSelect | **Yes** | From Instructors table; uses Full Name as label |
+| Car | LinkedSelect | No | From Cars table; optional |
+| Classroom | Select | No | `"Class Room 1"` or `"Class Room 2"`; optional |
+| Recurrence | Select | **Yes** | `None` / `Daily` / `Weekly` / `Bi-Weekly` |
+| End Date | Date picker | Conditional | Required when Recurrence ≠ `None`; cannot exceed 1 year from Start date |
+| Note | Text input | No | Free text |
 
-| Field | Input Type | Notes |
-|-------|-----------|-------|
-| Status | Segmented control | "Scheduled" or "Blocked Off" |
-| Instructor | LinkedSelect | From Instructors table |
-| Vehicle | LinkedSelect | From Cars table; optional for blocked-off records |
-| Location | Select | CH / GA / None |
-| Day of Week | Select (Recurring mode) | Mon–Sun; determines anchor date |
-| Date | Date picker (Week View) | Specific date for the record |
-| Start Time | Time input | Time of day the shift begins |
-| Shift Length | Hours + Minutes inputs | Stored as seconds in Airtable |
-| Cadence | Select | Weekly / Bi-Weekly |
-| Repeat Until | Date input | End of recurrence window (optional) |
+**Pre-fill from click context:**
+- **Date** — the calendar date of the column clicked
+- **Start Time** — the clicked hour, snapped to the nearest whole hour
+- **End Time** — defaults to Start + 8 hours (or end of day, whichever is earlier)
+
+**Recurrence expansion on save:**
+When Recurrence is set to anything other than `None`, the system creates **one Airtable record per shift occurrence**. For example, if the user sets:
+- Start: Mon Feb 23, 8:00 AM
+- End: Mon Feb 23, 4:00 PM
+- Recurrence: Weekly
+- End Date: Mon Mar 23
+
+The system generates 5 individual records (Feb 23, Mar 2, Mar 9, Mar 16, Mar 23), each as a standalone availability record in Airtable with the same time-of-day but on consecutive matching dates.
+
+For `Daily` recurrence, a record is created for every calendar day in the range. For `Bi-Weekly`, every other week.
+
+##### Edit Availability Form (Sidebar)
+
+Clicking an existing availability block opens the Edit Availability form in a sidebar. The form displays all the same fields as the Add form, pre-filled with the record's current values.
+
+**Scope Toggle:** At the top of the edit form, a segmented control lets the user choose the editing scope:
+
+| Mode | Label | Behavior |
+|------|-------|----------|
+| Single | "Single Shift" | Edits only the clicked record |
+| Future | "All Future Shifts" | Edits the clicked record AND all records that share the same recurring series from this date forward |
+
+> **Recurring series identification:** Since each occurrence is a standalone Airtable record, "same series" is determined by matching: same Instructor + same Car/Classroom + same time-of-day + same day-of-week (or daily pattern) + records on or after the selected record's date. The system queries for matching records and presents the count ("This will update N shifts") before applying changes.
+
+**Editable fields:** All fields from the Add form are editable:
+- Start (date + time)
+- End (date + time)
+- Instructor
+- Car
+- Classroom
+- Note
+
+When editing in "All Future Shifts" mode, changes to time-of-day, instructor, car, classroom, or note are applied to all matching future records. Changes to the date itself are not supported in bulk mode (it would break the recurrence pattern).
+
+**Delete:** A delete button appears in the form header. Deletion respects the same scope toggle:
+- "Single Shift" → deletes only the clicked record
+- "All Future Shifts" → deletes the clicked record and all matching future records
+- Confirmation dialog shows the count of records that will be deleted before proceeding
+
+**Split Shift:** A "Split" button appears in the form footer. Splitting divides the selected availability block into two separate records at a user-specified time.
+
+**Split flow:**
+1. User clicks "Split" — a time picker appears asking "Split at what time?"
+2. The time must be strictly between the shift's Start and End (not at either boundary)
+3. On confirm, the system:
+   - Updates the original record's End to the split time
+   - Creates a new record with Start = split time and End = the original End, copying all other fields (Instructor, Car, Classroom, Note) from the original
+4. The two resulting records are fully independent — editing or deleting one does not affect the other
+
+**Split use cases:**
+- Switching cars mid-day (split, then change the car on the second half)
+- Creating a gap for a doctor's appointment (split into two, then adjust end/start times or delete the middle portion — split twice to carve out a hole)
+- Changing location partway through the day
+
+**Split + scope:** Split always operates on a single record only (ignoring the scope toggle). After splitting, the user can then use "All Future Shifts" on either resulting record independently if needed.
+
+##### Write Behavior
+
+Each availability record is a standalone record in Airtable. Recurrence is expanded at creation time into individual records — the `Cadence` and `Repeate Until` fields on the Availability table are **not used** by this model (they remain in Airtable but are ignored).
+
+**Field mapping (form → Airtable):**
+
+| Form Field | Airtable Field | Transformation |
+|-----------|---------------|----------------|
+| Start (datetime) | `Start` | ISO 8601 datetime string |
+| End (datetime) | (not written) | `End` is a formula field — read-only |
+| End – Start | `Shift Length` | Computed as `(endMs - startMs) / 1000` → stored as seconds |
+| Instructor | `Instructor` | Wrapped in array: `[recId]` |
+| Car | `Vehicle` | Wrapped in array: `[recId]`; omitted if blank |
+| Classroom | `Classroom` | singleSelect value; omitted if blank |
+| Note | `Notes` | singleLineText; omitted if blank |
+| — | `Status` | Always set to `"Scheduled"` for availability records |
+
+- On any create/update/delete, the `["availability"]` cache is immediately invalidated
+- Split operations issue one PATCH (shorten original) + one POST (new second half) in sequence
+- "All Future Shifts" bulk edits issue parallel PATCH requests for all matching records
+- "All Future Shifts" bulk deletes issue parallel DELETE requests
 
 ##### Shortcut Actions
 
 - **Block Instructor (vacation)**: Select instructor + date range → auto-creates `Blocked Off` records for each day the instructor is normally scheduled in that range. Shows preview count before confirming.
 - **Block Car (out of service)**: Select car + date range → auto-creates vehicle-only `Blocked Off` records covering 8am–9pm for each day in the range.
-
-##### Write Behavior
-
-- Availability records use **field names** (not IDs) in API calls, per `AVAIL_FIELDS` in constants
-- `Instructor` and `Vehicle` are linked record arrays: `[recId]`
-- `Shift Length` is stored as seconds (e.g., 28800 = 8 hours)
-- `Start` is an ISO datetime string serving as the recurrence anchor
-- `Repeate Until` (typo in Airtable) is an ISO date string
-- On any create/update/delete, the `["availability"]` cache is immediately invalidated
 
 ### Appointment Form
 
@@ -553,29 +626,25 @@ height = (endMs - startMs) / 3_600_000 × PX_PER_HOUR  (min 20px)
 
 ### Overlap Resolution
 
-#### By Instructor mode
-
-1. **Seed lanes** from instructor IDs present in availability intervals (so lanes appear even on days with no appointments)
-2. Add any additional instructor IDs found in appointment data not already seeded
-3. Append an "unassigned" lane last if any appointments have no instructor
-4. Assign each lane an equal share of the column: `laneWidth = 100 / numLanes %`
-5. Within each lane, sort appointments by Start time, group into time-overlap clusters, sub-divide within each cluster
-6. Block `left` = `laneIndex × laneWidth + clusterOffset`
+The calendar uses **By Car** layout only (By Instructor mode was removed in Phase 11).
 
 #### By Car mode
 
-1. **Seed car lanes** from car IDs present in availability intervals
+1. **Seed car lanes** from car IDs present in availability intervals for that day (so lanes appear even with no appointments)
 2. Add any car IDs from appointment data not already seeded
-3. If any appointments or availability intervals have no car, append a single "No Car" lane at the right
-4. Within the No Car lane, run a nested **By Instructor** layout:
+3. Sort lanes in fixed order: Car 1 → Car 2 → ... → Car N → Class Room 1 → Class Room 2 → No Car (unassigned)
+4. Empty lanes are omitted — a lane only appears if it has availability intervals or appointments on that day
+5. If any appointments or availability intervals have no car (and no classroom), append a single "No Car" lane at the right
+6. Within the No Car lane, run a nested by-instructor sub-layout:
    - Seed instructor sub-lanes from no-car availability intervals
    - Add instructor IDs from no-car appointments
    - Assign each instructor an equal sub-lane within the No Car lane
-5. Re-scale all sub-lane geometry to fit within the No Car lane's pixel bounds
+7. Within each lane (or sub-lane), sort appointments by Start time, group into time-overlap clusters, sub-divide within clusters
+8. Re-scale all sub-lane geometry to fit within the No Car lane's pixel bounds
 
-Example: 3 cars + 2 no-car instructors → 4 lanes (3 car + 1 No Car); No Car lane itself split 50/50 per instructor.
+Example: 3 cars + 2 no-car instructors → 4 lanes (Car 1, Car 2, Car 3, No Car); No Car lane itself split 50/50 per instructor.
 
-Example: 4 instructors available on a day with no appointments → 4 lanes each 25% wide, all showing only the availability wash.
+Example: 4 instructors available on a day with no appointments → 4 no-car sub-lanes each 25% wide, all showing only the availability wash.
 
 ---
 
@@ -648,7 +717,7 @@ This section will grow as new error types are identified. All validation runs cl
 
 **Fields highlighted (orange):** Instructor, Date, Start Time
 
-**Message:** `"[Instructor Name] has no availability window covering this time. Schedule anyway?"`
+**Message:** `"[Instructor Name] has no availability window covering this time."`
 
 **Behavior:**
 - Checked eagerly whenever Instructor, Date, or Start Time changes
@@ -667,12 +736,12 @@ This section will grow as new error types are identified. All validation runs cl
 
 **Message:** Up to two contextual lines, omitting any line where the data is not available:
 ```
-[Instructor Name] is scheduled for [Their Car] at this time.
+[Instructor Name] should be scheduled for [Their Car] at this time.
 [Selected Car] is scheduled for [Its Instructor] at this time.
 ```
 - First line: shown only if the instructor has a covering window with a different car linked.
 - Second line: shown only if the selected car appears in another instructor's availability window at this time.
-- If neither line can be populated, falls back to: `"[Car Name] is not the car scheduled for [Instructor Name] at this time."`
+- If neither line can be populated, falls back to: `"[Selected Car] is not the car scheduled for [Instructor Name] at this time."`
 
 ---
 
@@ -716,13 +785,13 @@ or
 
 #### W5 — Instructor Not Marked Spanish-Capable *(warning)*
 
-**Trigger:** The appointment has `Spanish = true`, but the selected instructor is not marked as Spanish-capable in the Instructors table (`Spanish` field).
+**Trigger:** The appointment has `Spanish = true`, but the selected instructor's `Spanish` checkbox is `false` (or unset) in the Instructors table.
 
 **Severity:** Warning only — does not block submission.
 
 **Fields highlighted (orange):** Instructor
 
-**Message:** `"[Instructor Name] is not marked Spanish-capable in Airtable."`
+**Message:** `"[Instructor Name] cannot teach Spanish sessions"`
 
 **Behavior:**
 - Fires whenever Instructor or Spanish flag changes.
@@ -733,13 +802,13 @@ or
 
 #### W6 — Instructor Not Marked for Selected Tier *(warning)*
 
-**Trigger:** The appointment has a `Tier` selected (for example `EL` or `RL`), but the selected instructor's `Tiers` field in Airtable does not include that tier.
+**Trigger:** The appointment has a `Tier` selected (for example `EL` or `RL`), but the selected instructor's `Tiers` multiselect in the Instructors table does not include that tier value.
 
 **Severity:** Warning only — does not block submission.
 
 **Fields highlighted (orange):** Instructor
 
-**Message:** `"[Instructor Name] is not marked for tier [Tier] in Airtable."`
+**Message:** `"[Instructor Name] cannot teach [Tier] sessions"`
 
 **Behavior:**
 - Fires whenever Instructor or Tier changes.
@@ -839,39 +908,42 @@ Every field that crosses the boundary between Airtable storage and the UI is tra
 
 ```
 1. User clicks empty time slot in calendar
-2. DayColumn calculates clicked time (snapped to 60-min); checks availability intervals covering that time to extract instructorId and vehicleId
-3. CalendarPage opens AppointmentModal in create mode, passing a `prefill` object: { startDate, startTime, instructorId?, carId? }
-4. AppointmentForm reads prefill (not record) so isEdit = false; pre-populates Date, Start Time, Instructor, and Cars fields
+2. DayColumn calculates clicked time (snapped to 60-min); checks availability intervals
+   covering that time to extract instructorId, vehicleId, and location
+3. CalendarPage opens AppointmentSidebar in create mode, passing a `prefill` object:
+   { startDate, startTime, instructorId?, carId?, locationId? }
+4. AppointmentForm reads prefill (not record) so isEdit = false; pre-populates
+   Date, Start Time, Instructor, Car, and Location fields
 5. User fills in Student, Course, and any remaining fields
-5. AppointmentForm.onSubmit():
+6. AppointmentForm.onSubmit():
    - Combines Date + Time inputs into a single ISO string for Start
    - Wraps linked record IDs in arrays: [recId]
    - Strips undefined / empty fields
-6. useCreateAppointment.mutateAsync(fields) → POST to Airtable
-7. Airtable computes End, Pickup At, Dropoff At formulas
-8. TanStack Query invalidates appointments cache
-9. useAppointments re-fetches the year → UI updates
+7. useCreateAppointment.mutateAsync(fields) → POST to Airtable
+8. Airtable computes End, Pickup At, Dropoff At formulas
+9. TanStack Query invalidates appointments cache
+10. useAppointments re-fetches the year → UI updates
 ```
 
 ### Request Flow — Editing an Appointment
 
 ```
-1. User clicks appointment block (calendar) or pencil icon (table)
-2. AppointmentModal opens in edit mode with record data
-3. AppointmentForm.defaultValues():
+1. User clicks appointment block (calendar) → opens AppointmentSidebar in edit mode
+   or clicks pencil icon (table) → opens AppointmentModal in edit mode
+2. AppointmentForm.defaultValues():
    - Extracts first element from linked record arrays
    - Splits Start ISO string into separate date / time inputs
-4. User modifies fields and submits
-5. Same transformation as create (step 5 above)
-6. useUpdateAppointment.mutateAsync({ recordId, fields }) → PATCH to Airtable
-7. Cache invalidated → UI updates
+3. User modifies fields and submits
+4. Same transformations as create (step 6 above)
+5. useUpdateAppointment.mutateAsync({ recordId, fields }) → PATCH to Airtable
+6. Cache invalidated → UI updates
 ```
 
 ### Request Flow — Loading Reference Data
 
 ```
 1. App mounts → useReferenceData() runs 4 parallel queries
-2. Fetches: Instructors, Students, Vehicles, Courses
+2. Fetches: Instructors, Students, Cars, Courses
 3. Builds two structures per entity:
    - Map: { [recordId]: fields } — for name lookups during display
    - Options: [{ value: recordId, label: displayName }] — for form dropdowns
@@ -930,11 +1002,13 @@ All field IDs are centralized in [app/src/utils/constants.js](../app/src/utils/c
 | Vehicle | `fld6xoS3XDdBdX3Qd` | multipleRecordLinks | Linked car. For `Blocked Off`, may be left blank to create an instructor-only block. |
 | Location | `fld3hPPZq6RjQfEHo` | singleSelect | `"CH"` (Colonial Heights) or `"GA"` (Glen Allen) |
 | Status | `fldQTPMjnjTLbAgN6` | singleSelect | `"Scheduled"` or `"Blocked Off"` |
-| Start | `fldsvwUb7vY8JVwQr` | dateTime | First occurrence; recurrence anchor |
+| Start | `fldsvwUb7vY8JVwQr` | dateTime | Shift start datetime |
 | Shift Length | `flddlnzPypEaaDQnW` | duration (seconds) | Duration of the shift |
 | End | `fld9AfRH5dykYArQv` | dateTime formula | Read-only |
-| Cadence | `flddEcAhjU8RvIFlJ` | singleSelect | `"Weekly"`, `"Bi-Weekly"`, or `"Daily"` |
-| Repeate Until | `fldqclSXT33dNYKLq` | date | End of recurrence window (typo baked into Airtable) |
+| Classroom | `fld7YPZifR1Hn21EB` | singleSelect | `"Class Room 1"` or `"Class Room 2"`; optional |
+| Notes | `fldgdmX4a44WOaT2i` | multilineText | Free text |
+| Cadence | `flddEcAhjU8RvIFlJ` | singleSelect | `"Weekly"` or `"Bi-Weekly"` — legacy, no longer written |
+| Repeate Until | `fldqclSXT33dNYKLq` | date | Legacy — no longer written (typo baked into Airtable) |
 
 For `Status = "Blocked Off"` records:
 - At least one of `Instructor` or `Vehicle` should be populated.

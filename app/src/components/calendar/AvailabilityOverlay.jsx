@@ -12,7 +12,7 @@ import { fullName } from "@/hooks/useReferenceData";
  * @param {number}   pxPerHour   - vertical zoom value
  * @param {object}   refData     - reference data (instructors, vehicles maps)
  */
-export default function AvailabilityOverlay({ intervals, pxPerHour, refData, date, onClickTime }) {
+export default function AvailabilityOverlay({ intervals, pxPerHour, refData, date, onClickTime, onClickAvailability }) {
   if (!intervals?.length) return null;
 
   return (
@@ -62,6 +62,13 @@ export default function AvailabilityOverlay({ intervals, pxPerHour, refData, dat
 
         function handleStripClick(e) {
           e.stopPropagation(); // don't bubble to column's generic click handler
+
+          // If onClickAvailability is set (Availability view), open edit form for this record
+          if (onClickAvailability && iv.record) {
+            onClickAvailability(iv.record);
+            return;
+          }
+
           const rect = e.currentTarget.getBoundingClientRect();
           const y = e.clientY - rect.top;
           // Hour offset within this strip, then add the strip's own start hour

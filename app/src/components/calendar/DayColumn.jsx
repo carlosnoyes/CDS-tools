@@ -78,6 +78,7 @@ function annotateAvailabilityLanes(intervals, laneOrder, laneWidth, noCarSubLane
 export default function DayColumn({
   appointments, refData, onEdit, onClickTime, date,
   pxPerHour, availabilityIntervals = [],
+  onClickAvailability, hideAppointments,
 }) {
   const { sortedCarKeys, classroomKeys, noCarInstructorKeys } = buildSeeds(availabilityIntervals, appointments, refData);
 
@@ -130,6 +131,7 @@ export default function DayColumn({
         refData={refData}
         date={date}
         onClickTime={onClickTime}
+        onClickAvailability={onClickAvailability}
       />
 
       {/* Hour grid lines */}
@@ -149,8 +151,8 @@ export default function DayColumn({
         />
       ))}
 
-      {/* Appointment blocks */}
-      {resolved.map(({ appt, left, width }) => (
+      {/* Appointment blocks — hidden in availability-only mode */}
+      {!hideAppointments && resolved.map(({ appt, left, width }) => (
         <AppointmentBlock
           key={appt.id}
           appt={appt}

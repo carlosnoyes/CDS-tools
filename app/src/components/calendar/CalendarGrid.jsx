@@ -48,6 +48,8 @@ export default function CalendarGrid({
   onGutterResize,
   onColResize,
   onPopoutDay,
+  onClickAvailability,
+  hideAppointments,
 }) {
   const scrollRef = useRef(null);
   const weekRefs = useRef({});
@@ -310,6 +312,8 @@ export default function CalendarGrid({
                       availabilityIntervals={expandAvailability(availabilityRecords, day)}
                       onEdit={onEdit}
                       onClickTime={(time) => onCreateAt(time)}
+                      onClickAvailability={onClickAvailability}
+                      hideAppointments={hideAppointments}
                     />
                   </div>
                 ))}

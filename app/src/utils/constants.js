@@ -18,8 +18,8 @@ export const AVAIL_FIELDS = {
   start:        "Start",         // dateTime (ISO string)
   shiftLength:  "Shift Length",  // number (seconds)
   end:          "End",           // dateTime formula (read-only)
-  cadence:      "Cadence",       // singleSelect: "Weekly" | "Bi-Weekly"
-  repeateUntil: "Repeate Until", // date (typo baked into Airtable)
+  classroom:    "Classroom",     // singleSelect: "Class Room 1" | "Class Room 2"
+  notes:        "Notes",         // multilineText
 };
 
 // Appointments field IDs

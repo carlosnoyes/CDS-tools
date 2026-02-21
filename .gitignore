@@ -10,6 +10,9 @@ app/node_modules/
 # Build output
 app/dist/
 
+# One-time scripts (may contain secrets)
+scripts/
+
 # Editor / OS
 .DS_Store
 Thumbs.db

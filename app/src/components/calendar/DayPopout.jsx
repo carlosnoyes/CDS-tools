@@ -21,6 +21,8 @@ export default function DayPopout({
   onEdit,
   onCreateAt,
   onClose,
+  onClickAvailability,
+  hideAppointments,
 }) {
   const bodyRef = useRef(null);
   const [pxPerHour, setPxPerHour] = useState(null); // null until measured
@@ -104,6 +106,8 @@ export default function DayPopout({
                 availabilityIntervals={availIntervals}
                 onEdit={onEdit}
                 onClickTime={(time) => onCreateAt(time)}
+                onClickAvailability={onClickAvailability}
+                hideAppointments={hideAppointments}
               />
             )}
           </div>
